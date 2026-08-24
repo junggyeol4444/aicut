@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aicut"
+version = "0.1.0"
+description = "AI autonomous broadcast content producer: one long livestream VOD -> N finished YouTube videos"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+# The core engine runs on the stdlib + ffmpeg CLI. Everything below is opt-in
+# per pipeline stage, so a machine that only renders does not need torch.
+stt = ["whisperx"]
+diarization = ["pyannote.audio"]
+vision = ["opencv-python", "numpy"]
+audio = ["librosa", "soundfile"]
+llm = ["anthropic"]
+youtube = ["google-api-python-client", "google-auth-oauthlib"]
+yaml = ["PyYAML"]
+
+[project.scripts]
+aicut = "aicut.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["aicut*"]
+
+[tool.setuptools.package-data]
+aicut = ["db/*.sql"]

@@ -273,7 +273,10 @@ class Renderer:
         if not timeline.segments:
             raise RenderError(f"episode {plan.episode_id} has no renderable segment")
 
-        stage = self.work_dir / plan.episode_id
+        # Absolute, because ffmpeg's concat demuxer resolves the paths in the
+        # list file relative to the list file's own directory: a relative path
+        # written there would be joined onto the stage directory twice.
+        stage = (self.work_dir / plan.episode_id).resolve()
         stage.mkdir(parents=True, exist_ok=True)
         cuts_by_order = {c.sequence_order: c for c in plan.cuts}
 

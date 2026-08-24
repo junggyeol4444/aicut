@@ -238,9 +238,22 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 110 tests, ffmpeg 불필요
+python -m unittest discover -s . -p "test_*.py"    # 118 tests
 ```
 
-테스트는 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인 전체를 오프라인
-실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할 자리비움,
-지켜야 할 정적이 들어 있다.
+110개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
+전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
+자리비움, 지켜야 할 정적이 들어 있다.
+
+나머지 8개(`tests/test_render_live.py`)는 **실제로 ffmpeg를 돌린다.** ffmpeg가
+없으면 건너뛴다. 나머지 테스트는 렌더러가 *만드는 명령*을 검사하지만, 이쪽은
+그 명령이 실제 파일에 무슨 짓을 하는지 검사한다:
+
+- `remove_spans`가 정말 파일에서 빠졌는가 (길이로 확인)
+- 계획 순서대로 렌더되는가 — 완성본 첫 프레임이 원본 뒷부분과 일치하는지 PSNR로 대조
+- 자막이 정말 태워졌는가 (자막 구간과 비자막 구간의 PSNR 차이)
+- 2-pass 라우드니스가 목표치에 닿는가
+- 줌이 픽셀을 실제로 옮기는가 (파싱만 되는 게 아니라)
+
+이 층이 잡은 버그: concat 목록의 상대경로가 목록 파일 위치 기준으로 다시
+풀려서 경로가 중복됐다. 인자 배열만 보면 멀쩡해 보이는 종류의 버그다.

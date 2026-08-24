@@ -116,13 +116,35 @@ def sendcmd_file(keyframes: Sequence[dict[str, Any]], path: str | Path) -> Path:
     Each keyframe is ``{"at_sec": t, "scale": s, "center": [cx, cy]}`` in
     segment-local time. ffmpeg applies each command at its timestamp, so the
     camera moves in steps as fine as the keyframes are dense.
+
+    **This path pans; it does not zoom.** crop marks ``w`` and ``h``
+    runtime-commandable, but sending them stalls the graph: measured on ffmpeg
+    7.1, a segment whose crop size changes mid-stream hangs with the process
+    idle (60s wall, 0.5s CPU, no output), because the downstream scale filter
+    never reconfigures. Only ``x`` and ``y`` are sent, at one constant crop
+    size, and a keyframe list carrying more than one scale is flattened with a
+    warning rather than silently pretending to zoom.
+
+    A zoom that actually changes magnification therefore belongs to the
+    ``segment_crop`` strategy, which splits the change into segments and gets a
+    stepped camera. Which of the two a channel prefers is the MVP 6
+    measurement 10.4 asks for; this is one of its inputs.
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(keyframes, key=lambda k: float(k.get("at_sec", 0.0)))
+    scales = {round(float(kf.get("scale", 0.83)), 4) for kf in ordered}
+    scale = max(0.2, min(1.0, float(ordered[0].get("scale", 0.83)))) if ordered else 0.83
+    if len(scales) > 1:
+        log.warning(
+            "sendcmd zoom holds %d different scales %s; crop cannot resize mid-segment without"
+            " stalling the graph, so the camera pans at scale %.2f. Use the segment_crop strategy"
+            " for a magnification change (10.4-1).",
+            len(scales), sorted(scales), scale,
+        )
     lines = []
-    for kf in sorted(keyframes, key=lambda k: float(k.get("at_sec", 0.0))):
+    for kf in ordered:
         at = float(kf.get("at_sec", 0.0))
-        scale = max(0.2, min(1.0, float(kf.get("scale", 0.83))))
         cx, cy = kf.get("center", [0.5, 0.5])
         cx = max(0.0, min(1.0, float(cx)))
         cy = max(0.0, min(1.0, float(cy)))

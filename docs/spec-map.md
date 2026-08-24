@@ -59,7 +59,9 @@
 
 - 10.1 렌더러는 판단하지 않음 → `Renderer.render()`는 `EditPlan`만 받는다
 - 10.3 자막 스타일 외부화 → `config/subtitle_styles/*.json`
-- 10.4-1 crop 표현식 오류 수정 → `render/ffmpeg.py: zoom_filter()`, `sendcmd_file()`
+- 10.4-1 crop 표현식 오류 수정 → `render/ffmpeg.py: zoom_filter()`, `sendcmd_file()`.
+  실측 결과: sendcmd로 crop `w`/`h`를 바꾸면 그래프 교착(ffmpeg 7.1). sendcmd는 팬 전용,
+  배율 변화는 `segment_crop`. MVP 6 비교의 입력 하나가 이걸로 확정됐다
 - 10.4-2 acrossfade 오용 수정 → `audio_edge_filter()` + `build_concat_command()`
 - 10.4-3 2-pass 라우드니스 → `media/audio.py: measure_loudness()` → `build_final_command()`
 

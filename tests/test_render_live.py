@@ -180,6 +180,54 @@ class LiveRenderTests(unittest.TestCase):
             "the zoomed render is indistinguishable from the unzoomed one",
         )
 
+    def test_sendcmd_zoom_pans_the_frame_over_time(self):
+        """10.4-1 strategy (b). It pans at a fixed crop size; see sendcmd_file."""
+        keyframes = [
+            {"at_sec": 0, "scale": 0.6, "center": [0.15, 0.15]},
+            {"at_sec": 3, "scale": 0.6, "center": [0.85, 0.85]},
+        ]
+        panning = Episode(project_id="p", timeline=[
+            Cut(0, 2.0, 8.0, visual_effect={"type": "zoom", "scale": 0.6, "center": [0.15, 0.15],
+                                            "keyframes": keyframes}),
+        ])
+        fixed = Episode(project_id="p", timeline=[
+            Cut(0, 2.0, 8.0, visual_effect={"type": "zoom", "scale": 0.6, "center": [0.15, 0.15]}),
+        ])
+        moving_profile = _fast_profile().with_overrides({"render.zoom.strategy": "sendcmd"}, measured=[])
+        plan = EditPlan.from_episode(panning, str(self.source))
+        moved = self.dir / "panned.mp4"
+        Renderer(moving_profile, self.dir / "work_pan").render(plan, moved)
+        still = self._render(fixed, "fixed_crop")
+
+        before = _psnr(_frame(moved, 0.5, self.dir / "pan0.png"), _frame(still, 0.5, self.dir / "fix0.png"))
+        after = _psnr(_frame(moved, 5.0, self.dir / "pan5.png"), _frame(still, 5.0, self.dir / "fix5.png"))
+        self.assertGreater(before, after, "the camera never moved away from its starting position")
+
+    def test_sendcmd_with_mixed_scales_flattens_instead_of_stalling(self):
+        """crop w/h commands hang the graph (measured), so scale keyframes are
+        flattened to one crop size and the file must still come out."""
+        from aicut.render.ffmpeg import sendcmd_file
+
+        path = sendcmd_file(
+            [{"at_sec": 0, "scale": 0.9, "center": [0.2, 0.2]},
+             {"at_sec": 3, "scale": 0.45, "center": [0.8, 0.8]}],
+            self.dir / "mixed.cmd",
+        )
+        text = path.read_text()
+        self.assertNotIn("crop w", text)
+        self.assertNotIn("crop h", text)
+        self.assertEqual(text.count("crop x"), 2)
+
+        episode = Episode(project_id="p", timeline=[
+            Cut(0, 2.0, 6.0, visual_effect={"type": "zoom", "scale": 0.9, "center": [0.2, 0.2],
+                                            "keyframes": [{"at_sec": 0, "scale": 0.9, "center": [0.2, 0.2]},
+                                                          {"at_sec": 2, "scale": 0.45, "center": [0.8, 0.8]}]}),
+        ])
+        profile = _fast_profile().with_overrides({"render.zoom.strategy": "sendcmd"}, measured=[])
+        out = self.dir / "mixed.mp4"
+        Renderer(profile, self.dir / "work_mixed").render(EditPlan.from_episode(episode, str(self.source)), out)
+        self.assertAlmostEqual(_probe_duration(out), 4.0, delta=0.25)
+
     def test_an_empty_timeline_is_refused_rather_than_producing_a_broken_file(self):
         from aicut.errors import RenderError
 

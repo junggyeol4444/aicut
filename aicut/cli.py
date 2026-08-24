@@ -268,6 +268,131 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_learn(args) -> int:
+    """Run one of the three learning loops (12.3)."""
+    from aicut.intelligence import reference as reference_mod
+    from aicut.intelligence.knowledge import ProductionKnowledge
+
+    store = _store(args)
+    producer = get_producer(args.producer)
+    knowledge_path = Path(args.workspace) / "knowledge.json"
+
+    if args.loop == "reference":
+        # Loop A. Only public metrics are fetched, and only patterns are kept (4.2, 4.6).
+        client = _youtube(args, store)
+        queries = args.query or reference_mod.DEFAULT_QUERIES
+        references = reference_mod.collect_references(client, queries, per_query=args.per_query)
+        print(f"collected {len(references)} references; analysing")
+        reference_mod.analyze(producer, store, references)
+        knowledge = reference_mod.build_knowledge(store)
+        knowledge.save(knowledge_path)
+        print(f"knowledge from {knowledge.sample_size} references -> {knowledge_path}")
+        return 0
+
+    if args.loop == "pairs":
+        # Loop B, the differentiator: what a human actually kept, dropped, reordered.
+        from aicut.intelligence.source_output import align_by_transcript, learn as learn_pair
+        from aicut.media.stt import TranscriptFileTranscriber
+
+        if not args.source_transcript or not args.output_transcript:
+            print("loop B needs --source-transcript and --output-transcript", file=sys.stderr)
+            return 1
+        source = TranscriptFileTranscriber(args.source_transcript).transcribe()
+        output = TranscriptFileTranscriber(args.output_transcript).transcribe()
+        alignment = align_by_transcript(source, output)
+        analysis = learn_pair(
+            producer, store, alignment,
+            source_ref=args.source_ref or args.source_transcript,
+            output_ref=args.output_ref or args.output_transcript,
+        )
+        measured = analysis["measured"]
+        print(
+            f"kept {measured['kept_spans']} spans, dropped {measured['dropped_spans']},"
+            f" keep_ratio {measured['keep_ratio']}, reordered {measured['reordered']}"
+        )
+        for rule in analysis.get("inferred_rules", []):
+            print(f"  rule: {rule}")
+        knowledge = ProductionKnowledge.load(knowledge_path)
+        knowledge.source_output_rules.extend(analysis.get("inferred_rules", []))
+        knowledge.save(knowledge_path)
+        print(f"this pair also serves as a 17.2 calibration dataset entry")
+        return 0
+
+    # Loop C.
+    from aicut.pipeline import performance
+
+    project = store.get_project(args.project)
+    if project is None:
+        print(f"unknown project {args.project}", file=sys.stderr)
+        return 1
+    ctx = _context(args, project)
+    client = _youtube(args, store)
+    collected = performance.collect(ctx, client, days=args.days)
+    print(f"collected metrics for {len(collected)} published episodes")
+    result = performance.learn(ctx, knowledge_path)
+    for observation in result.get("observations", []):
+        print(f"  {observation}")
+    return 0
+
+
+def cmd_upload(args) -> int:
+    """Upload rendered episodes privately, or drain the retry queue (11.3, 11.4)."""
+    from aicut.intelligence.quota import QuotaLedger
+    from aicut.pipeline import publishing
+
+    store = _store(args)
+    profile = _profile(args)
+    ledger = QuotaLedger(
+        store,
+        daily_limit=profile.get_int("upload.daily_quota_units"),
+        timezone_name=profile.get("upload.quota_reset_timezone"),
+    )
+    client = _youtube(args, store, ledger=ledger)
+
+    if args.retry:
+        project = store.get_project(args.project) if args.project else None
+        if project is None:
+            projects = store.list_projects()
+            if not projects:
+                print("no projects", file=sys.stderr)
+                return 1
+            project = projects[-1]
+        ctx = _context(args, project)
+        done = publishing.process_retry_queue(ctx, client, ledger)
+        print(f"uploaded {len(done)} queued episodes; {ledger.uploads_left_today()} uploads left today")
+        return 0
+
+    episode = store.get_episode(args.episode)
+    if episode is None:
+        print(f"unknown episode {args.episode}", file=sys.stderr)
+        return 1
+    ctx = _context(args, store.get_project(episode.project_id))
+    if args.publish:
+        publishing.publish_approved(ctx, episode, client)
+        print(f"{episode.episode_id} is now public")
+        return 0
+    result = publishing.upload_episode(ctx, episode, client)
+    print(f"uploaded {result['url']} as {result['privacy_status']}")
+    print("it stays private until a person approves it: aicut review <episode> approve --reviewer <name>")
+    return 0
+
+
+def _youtube(args, store, ledger=None):
+    from aicut.intelligence.quota import QuotaLedger
+    from aicut.intelligence.youtube import YouTubeClient, load_credentials
+
+    profile = _profile(args)
+    ledger = ledger or QuotaLedger(
+        store,
+        daily_limit=profile.get_int("upload.daily_quota_units"),
+        timezone_name=profile.get("upload.quota_reset_timezone"),
+    )
+    credentials = load_credentials(
+        args.client_secrets, args.token or str(Path(args.workspace) / "youtube_token.json")
+    )
+    return YouTubeClient(credentials, ledger)
+
+
 def cmd_ui(args) -> int:
     """The operator screens of 15.1, served on localhost."""
     from aicut.ui import serve
@@ -390,6 +515,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     prof = sub.add_parser("profile", help="show a calibration profile and what is still a guess")
     prof.set_defaults(func=cmd_profile)
+
+    learn = sub.add_parser("learn", help="run a learning loop (12.3)")
+    learn.add_argument("loop", choices=["reference", "pairs", "performance"])
+    learn.add_argument("--query", action="append", help="reference search query (loop A, repeatable)")
+    learn.add_argument("--per-query", type=int, default=25)
+    learn.add_argument("--source-transcript", help="loop B: transcript of the source broadcast")
+    learn.add_argument("--output-transcript", help="loop B: transcript of the human-made video")
+    learn.add_argument("--source-ref")
+    learn.add_argument("--output-ref")
+    learn.add_argument("--project", help="loop C: which project's published episodes")
+    learn.add_argument("--days", type=int, default=28)
+    learn.add_argument("--client-secrets", default="client_secrets.json")
+    learn.add_argument("--token")
+    learn.set_defaults(func=cmd_learn)
+
+    upload = sub.add_parser("upload", help="upload privately, publish an approved episode, or retry (11.3, 11.4)")
+    upload.add_argument("episode", nargs="?")
+    upload.add_argument("--publish", action="store_true", help="make an approved episode public")
+    upload.add_argument("--retry", action="store_true", help="drain the quota retry queue")
+    upload.add_argument("--project")
+    upload.add_argument("--client-secrets", default="client_secrets.json")
+    upload.add_argument("--token")
+    upload.set_defaults(func=cmd_upload)
 
     ui = sub.add_parser("ui", help="operator screens: submit, monitor, review (15장)")
     ui.add_argument("--host", default="127.0.0.1")

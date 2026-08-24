@@ -42,7 +42,8 @@ class TranscriptFileTranscriber(Transcriber):
         self.transcript_path = Path(transcript_path)
         self.track = track
 
-    def transcribe(self, path: str, media: MediaInfo) -> list[Utterance]:
+    def transcribe(self, path: str = "", media: MediaInfo | None = None) -> list[Utterance]:
+        """Path and media are ignored: the transcript is the source of truth here."""
         data = json.loads(self.transcript_path.read_text(encoding="utf-8"))
         return utterances_from_whisperx(data, track=self.track)
 

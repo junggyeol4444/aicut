@@ -51,6 +51,15 @@ Return: [{"summary": str, "people": [str], "mentions": [{"source_start_sec": num
 "role" describes the moment's place in the event (first mention, related talk,
 callback, conflict, result, ...) in your own words.
 """,
+    "merge_events": """\
+A very long broadcast was read in chunks, so the same event may have been built
+more than once - once per chunk it appears in (16장). Group the events that are
+the same event. An event mentioned in chunk 1 and paid off in chunk 4 is one
+event, not two. Leave an event alone when it stands by itself.
+Return: [{"member_indices": [int], "summary": str, "people": [str],
+"relations": [{"event_index": int, "kind": str}]}]
+Every input index must appear in exactly one group.
+""",
     "discover_candidates": """\
 Decide which self-contained contents exist inside this broadcast (6장).
 Split by event, never by screen state: mixed screens with one event are one

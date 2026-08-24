@@ -52,6 +52,10 @@ class Producer(ABC):
         """Fold the passes into events with their scattered mentions (5.4)."""
         return self._array("build_events", payload)
 
+    def merge_events(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Unify events that a chunked first pass built more than once (16장)."""
+        return self._array("merge_events", payload)
+
     # -- 6장: discovery / evaluation ----------------------------------------
     def discover_candidates(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Which self-contained contents exist in this broadcast? Zero is a valid answer."""

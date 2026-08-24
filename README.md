@@ -72,6 +72,29 @@ aicut quota
 aicut ui                 # http://127.0.0.1:8765
 ```
 
+### 학습 루프 (12.3)
+
+```bash
+# A. 레퍼런스 — 공개 지표와 메타데이터만 수집, 패턴만 저장 (4.2, 4.6)
+aicut learn reference --query "게임 스트리머 편집 영상" --producer anthropic
+
+# B. 원본↔완성본 — 이 시스템의 핵심 차별점. 네트워크 불필요.
+#    같은 작업이 17.2 캘리브레이션 데이터셋이 된다
+aicut learn pairs --source-transcript src.json --output-transcript out.json
+
+# C. 성과 — 자기 채널 한정
+aicut learn performance --project <id> --days 28
+```
+
+### 업로드 (11.3, 11.4)
+
+```bash
+aicut upload <episode-id>              # 비공개로 올린다
+aicut review <episode-id> approve --reviewer me
+aicut upload <episode-id> --publish    # 승인된 것만 공개된다
+aicut upload --retry                   # 쿼터 초과로 밀린 큐 처리
+```
+
 `--producer mock`(기본값)은 모델 호출 없이 파이프라인 전체를 돌리는 오프라인
 스텁이다. 판단을 하지 않으며, 모든 판정에 `mock` 딱지가 붙는다.
 
@@ -196,8 +219,10 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
   헤드리스에서 실제로 돌고 테스트되기 때문에 이 방식을 택했다.
   PyQt6 `QWebEngineView`나 Electron 셸이 같은 서버를 감싸면 UI 로직 변경 없이
   22.1의 "단일 실행 가능한 데스크톱 프로그램"이 된다.
-- **얼굴/표정 인식** — 화면 상황 판정(5.3)에서 토크/게임 구분은 얼굴 신호가
-  주입되지 않으면 `UNKNOWN`으로 남긴다. 추측하지 않는다.
+- **얼굴 인식 정밀도** — Haar cascade다 (`aicut run --frames`, OpenCV 필요).
+  "얼굴이 화면을 얼마나 채우는가" 수준의 거친 질문에만 답한다.
+  OpenCV가 없으면 토크/게임 구분은 `UNKNOWN`으로 남는다 — 추측하지 않는다.
+  표정 변화는 얼굴 박스의 이동·크기 변화로 대신한다(11.1). 랜드마크 모델 아님.
 - **웃음/비명 검출기** — 텐션 계산의 laughter 항은 검출기가 없으면 0점을 주는
   대신 가중치를 재분배한다.
 - **실측 대기** — MVP 6(10.4 줌 전략 선택), MVP 8(쿼터 증량 승인),
@@ -209,7 +234,7 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 84 tests, ffmpeg 불필요
+python -m unittest discover -s . -p "test_*.py"    # 101 tests, ffmpeg 불필요
 ```
 
 테스트는 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인 전체를 오프라인

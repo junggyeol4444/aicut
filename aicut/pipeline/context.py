@@ -16,6 +16,7 @@ from aicut.analysis.tension import TensionCurve
 from aicut.config import CalibrationProfile
 from aicut.db.store import Store
 from aicut.llm import Producer
+from aicut.media.faces import FaceReading
 from aicut.media.probe import MediaInfo
 from aicut.media.audio import Silence
 from aicut.media.vision import MotionSample
@@ -29,6 +30,9 @@ class SignalBundle:
     tension: TensionCurve = field(default_factory=TensionCurve)
     motion: list[MotionSample] = field(default_factory=list)
     silences: list[Silence] = field(default_factory=list)
+    faces: list[FaceReading] = field(default_factory=list)
+    """Face readings from the sampled frames. Empty when no detector was available -
+    callers must degrade rather than assume a value (5.3, 11.1)."""
     rms: list[tuple[float, float]] = field(default_factory=list)
     """Raw ``(time_sec, level_db)``, kept so the tension curve can be rebuilt
     with different profile weights without decoding the source again (17.4)."""
@@ -45,6 +49,11 @@ class SignalBundle:
             "motion": [{"at_sec": round(m.at_sec, 3), "score": round(m.score, 4)} for m in self.motion],
             "silences": [{"start_sec": round(s.start_sec, 3), "end_sec": round(s.end_sec, 3)} for s in self.silences],
             "rms": [[round(t, 3), round(level, 2)] for t, level in self.rms],
+            "faces": [
+                {"at_sec": round(f.at_sec, 3), "face_ratio": round(f.face_ratio, 4),
+                 "face_count": f.face_count, "box": list(f.box) if f.box else None}
+                for f in self.faces
+            ],
             "speaker_reliability": self.speaker_reliability,
         }
 
@@ -61,6 +70,14 @@ class SignalBundle:
             motion=[MotionSample(at_sec=m["at_sec"], score=m["score"]) for m in data.get("motion", [])],
             silences=[Silence(start_sec=s["start_sec"], end_sec=s["end_sec"]) for s in data.get("silences", [])],
             rms=[(float(t), float(level)) for t, level in data.get("rms", [])],
+            faces=[
+                FaceReading(
+                    at_sec=f["at_sec"], face_ratio=f["face_ratio"],
+                    face_count=f.get("face_count", 0),
+                    box=tuple(f["box"]) if f.get("box") else None,
+                )
+                for f in data.get("faces", [])
+            ],
             speaker_reliability=float(data.get("speaker_reliability", 0.0)),
         )
 

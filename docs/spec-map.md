@@ -91,7 +91,7 @@
 | 쿼터 초과 | 로컬 보관 + `tb_upload_queue`에 PT 자정 기준 재시도 등록 |
 | 렌더링 실패 | 편집 계획 보존, `aicut render <plan>`으로 렌더만 재실행 |
 | 화자 분리 실패 | `UNKNOWN` 태그로 진행, 화자 기반 연출만 비활성 (`speaker_reliability`) |
-| 10시간 초과 원본 | `scan.long_source_split_sec` 기준 청크 처리 후 사건 그래프에서 병합 |
+| 10시간 초과 원본 | `understanding._build_events()`가 `scan.long_source_chunk_sec` 단위로 접고 `_merge_events()`로 병합. 병합 패스가 빠뜨린 사건은 그대로 살아남는다 (자료 유실 금지) |
 
 ## 17장 — 캘리브레이션
 

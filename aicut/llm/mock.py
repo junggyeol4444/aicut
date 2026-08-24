@@ -111,6 +111,33 @@ class MockProducer(Producer):
             })
         return events
 
+    def _task_merge_events(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        events = payload.get("events", [])
+        groups: list[dict[str, Any]] = []
+        for index, event in enumerate(events):
+            people = set(event.get("people", []))
+            topics = _keywords(event.get("summary", ""))
+            target = None
+            for group in groups:
+                if (people & group["people"]) and (topics & group["topics"]):
+                    target = group
+                    break
+            if target is None:
+                target = {"people": set(people), "topics": set(topics), "members": []}
+                groups.append(target)
+            target["people"] |= people
+            target["topics"] |= topics
+            target["members"].append(index)
+        return [
+            {
+                "member_indices": g["members"],
+                "summary": events[g["members"][0]].get("summary", ""),
+                "people": sorted(g["people"]),
+                "relations": [],
+            }
+            for g in groups
+        ]
+
     # -- 6장 -----------------------------------------------------------------
     def _task_discover_candidates(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         out = []

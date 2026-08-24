@@ -268,6 +268,26 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_ui(args) -> int:
+    """The operator screens of 15.1, served on localhost."""
+    from aicut.ui import serve
+
+    httpd, ui = serve(
+        Path(args.workspace), host=args.host, port=args.port,
+        profile_path=args.profile, producer_name=args.producer,
+    )
+    print(f"aicut ui on http://{args.host}:{args.port}  (workspace {args.workspace})")
+    print("localhost only, no authentication - do not expose this port")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopping")
+    finally:
+        httpd.server_close()
+        ui.close()
+    return 0
+
+
 def cmd_doctor(args) -> int:
     """Check the preconditions of 20.2 before a run rather than during one."""
     checks = {
@@ -370,6 +390,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     prof = sub.add_parser("profile", help="show a calibration profile and what is still a guess")
     prof.set_defaults(func=cmd_profile)
+
+    ui = sub.add_parser("ui", help="operator screens: submit, monitor, review (15장)")
+    ui.add_argument("--host", default="127.0.0.1")
+    ui.add_argument("--port", type=int, default=8765)
+    ui.set_defaults(func=cmd_ui)
 
     doctor = sub.add_parser("doctor", help="check the prerequisites of 20.2")
     doctor.set_defaults(func=cmd_doctor)

@@ -104,3 +104,21 @@
 
 `llm/base.py: Producer`의 메서드 목록이 "AI가 담당"의 전부다.
 그 밖의 모든 것(디코딩·DB·검색·렌더링·API·큐)은 프로그램이 한다.
+
+## 15장 — UI
+
+`aicut ui`가 15.1의 4단계 플로우를 그대로 제공한다.
+
+| 화면 | 엔드포인트 | 문서 |
+|---|---|---|
+| 입력 패널 | `POST /api/projects` | 15.2 |
+| 진행 모니터 | `GET /api/jobs/<id>` (상태 + 실시간 로그) | 15.3 |
+| 콘텐츠 후보 검토 | `GET/POST /api/projects/<id>/candidates` | 15.4 |
+| 결과 패널 | `GET /api/projects/<id>/episodes`, `/api/episodes/<id>/plan`, `POST …/review` | 15.5 |
+
+- 후보 화면은 AI의 결정과 **판단 근거**를 함께 띄우고, 동의/반대를 받아
+  `TB_CONTENT_CANDIDATE.human_verdict`에 적재한다 (12.3 B 학습 데이터).
+- 검수 API는 검수자 이름 없이는 승인을 거부한다 (11.3 — 누가 공개를 허락했는지 기록).
+- 미측정 파라미터 경고를 모든 화면 상단에 띄운다 (17.5).
+- 전달 방식은 로컬 HTTP 서버 + 정적 페이지다. 20.1이 적은 PyQt6/Electron 래퍼는
+  이 서버를 감싸는 방식으로 나중에 붙일 수 있다.

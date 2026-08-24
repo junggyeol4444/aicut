@@ -67,6 +67,9 @@ aicut review <episode-id> approve --reviewer me
 
 # 6. 쿼터 상태와 다음 PT 자정 리셋 시각 (11.4)
 aicut quota
+
+# 화면으로 조작 (15장) — 1~5번을 브라우저에서
+aicut ui                 # http://127.0.0.1:8765
 ```
 
 `--producer mock`(기본값)은 모델 호출 없이 파이프라인 전체를 돌리는 오프라인
@@ -95,6 +98,9 @@ QUEUED → PARSING → UNDERSTANDING → DISCOVERING → EVALUATING
 | RENDERING | 편집 계획만 읽고 실행. 판단 없음 | 10장 |
 | PACKAGED | 썸네일 후보 추출, 제목/설명/태그/챕터 | 11장 |
 | REVIEW_PENDING | 사람 검수 게이트 (필수) | 11.3 |
+
+조작 화면은 `aicut ui` (15.1의 4단계 플로우: 입력 / 진행 / 후보 검토 / 결과).
+localhost 전용이고 인증이 없다 — 포트를 외부에 열지 말 것.
 
 1차 통과는 **화면 전환 감지로 대체하지 않는다.** 게임 화면이 30분간 그대로여도
 그 안에서 일이 벌어지므로, 전 구간을 빠짐없이 통과한다 (5.1).
@@ -185,8 +191,11 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 
 정직하게 적는다.
 
-- **GUI (15장)** — CLI로만 조작한다. 15.2~15.5의 화면은 미구현이며,
-  대신 같은 정보를 `aicut candidates` / `aicut plan` / `report.json`이 제공한다.
+- **PyQt6 / Electron 래퍼 (20.1)** — 15장의 네 화면은 `aicut ui`로 구현되어 있으나,
+  전달 방식이 기획안이 적은 데스크톱 래퍼가 아니라 로컬 HTTP 서버 + 정적 페이지다.
+  헤드리스에서 실제로 돌고 테스트되기 때문에 이 방식을 택했다.
+  PyQt6 `QWebEngineView`나 Electron 셸이 같은 서버를 감싸면 UI 로직 변경 없이
+  22.1의 "단일 실행 가능한 데스크톱 프로그램"이 된다.
 - **얼굴/표정 인식** — 화면 상황 판정(5.3)에서 토크/게임 구분은 얼굴 신호가
   주입되지 않으면 `UNKNOWN`으로 남긴다. 추측하지 않는다.
 - **웃음/비명 검출기** — 텐션 계산의 laughter 항은 검출기가 없으면 0점을 주는
@@ -200,7 +209,7 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 71 tests, ffmpeg 불필요
+python -m unittest discover -s . -p "test_*.py"    # 84 tests, ffmpeg 불필요
 ```
 
 테스트는 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인 전체를 오프라인

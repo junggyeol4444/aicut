@@ -54,13 +54,20 @@ def _u(text: str | None, fallback: Any) -> Any:
 class Store:
     """Thin repository over SQLite. One instance per workspace database."""
 
-    def __init__(self, path: str | Path = ":memory:"):
+    def __init__(self, path: str | Path = ":memory:", *, timeout: float = 30.0):
         self.path = str(path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, timeout=timeout)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        if self.path != ":memory:":
+            # The UI runs a pipeline on a worker thread while the browser polls
+            # from request threads; each thread opens its own connection (SQLite
+            # forbids sharing one), so WAL keeps a reader from blocking on the
+            # writer and busy_timeout absorbs the overlap.
+            self.conn.execute("PRAGMA journal_mode = WAL")
+            self.conn.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
         self.migrate()
 
     def migrate(self) -> None:

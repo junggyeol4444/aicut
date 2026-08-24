@@ -179,9 +179,11 @@ class Pipeline:
         if record_state:
             ctx.project.status = state.value
         ctx.note("elapsed_sec", round(time.time() - started, 1))
-        ctx.note("provisional_parameters_used", self.profile.touched_provisional())
-        ctx.note("producer", self.producer.name)
-        ctx.note("profile", self.profile.name)
+        # Report on the profile and producer that actually ran this context - a
+        # resumed run may have been handed different ones than the pipeline holds.
+        ctx.note("provisional_parameters_used", ctx.profile.touched_provisional())
+        ctx.note("producer", ctx.producer.name)
+        ctx.note("profile", ctx.profile.name)
         report = build_report(ctx, state, episodes)
         (ctx.project_dir / "report.json").write_text(
             json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"

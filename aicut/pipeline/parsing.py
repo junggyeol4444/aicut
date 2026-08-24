@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from aicut.analysis.tension import build_tension_curve
+from aicut.analysis.vocalburst import build_detector
 from aicut.media import audio as audio_mod
 from aicut.media import vision as vision_mod
 from aicut.media.probe import probe
@@ -51,9 +52,23 @@ def run(ctx: RunContext, transcriber: Transcriber | None = None, *, use_cache: b
     else:
         utterances = ctx.store.utterances(ctx.project.project_id)
 
+    # Laughter and screams are derived from the cached RMS plus the transcript,
+    # so a re-tuned profile changes them without touching the media (9.1).
+    detector = build_detector(ctx.profile.get("laughter.detector"))
+    laughter = None
+    if detector is not None and ctx.signals.rms:
+        ctx.signals.bursts = detector.detect(ctx.signals.rms, utterances, ctx.profile)
+        laughter = detector.as_signal(ctx.signals.bursts)
+        ctx.note("vocal_bursts", len(ctx.signals.bursts))
+    else:
+        ctx.note(
+            "laughter_note",
+            "no vocal burst detector: the laughter weight is redistributed rather than scored zero (9.1)",
+        )
+
     # The tension curve is derived, not measured: rebuild it from the cached RMS
     # every run so a re-tuned profile takes effect without touching the media.
-    ctx.signals.tension = build_tension_curve(ctx.signals.rms, utterances, ctx.profile)
+    ctx.signals.tension = build_tension_curve(ctx.signals.rms, utterances, ctx.profile, laughter=laughter)
     if utterances:
         ctx.signals.speaker_reliability = speaker_reliability(utterances)
 

@@ -201,6 +201,7 @@ CUT   파밍·이동·자리비움 — 통째로 제거
 
 ```bash
 aicut profile                                   # 지금 무엇이 추측값인지 확인
+aicut calibrate --init --channel mychannel      # 17.4 1단계: 내 방송의 실제 레벨 분포에서 시작값 측정
 aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel mychannel
 ```
 
@@ -223,8 +224,11 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
   "얼굴이 화면을 얼마나 채우는가" 수준의 거친 질문에만 답한다.
   OpenCV가 없으면 토크/게임 구분은 `UNKNOWN`으로 남는다 — 추측하지 않는다.
   표정 변화는 얼굴 박스의 이동·크기 변화로 대신한다(11.1). 랜드마크 모델 아님.
-- **웃음/비명 검출기** — 텐션 계산의 laughter 항은 검출기가 없으면 0점을 주는
-  대신 가중치를 재분배한다.
+- **웃음/비명 분류기** — 학습된 분류기가 아니다. "이 방송 자체의 발화 레벨 대비
+  크고, 그 아래 받아쓰인 단어가 거의 없다"는 두 신호로 판정한다 (`analysis/vocalburst.py`).
+  웃음·비명·환호는 크고 단어가 없고, 흥분한 발화는 크고 단어가 많다는 구분이다.
+  거칠다 — 길게 지르는 문장은 놓치고 큰 기침은 잡는다. 숨기지 않고 적어 둔다.
+  진짜 분류기는 `VocalBurstDetector` 뒤에 그대로 갈아 끼운다.
 - **실측 대기** — MVP 6(10.4 줌 전략 선택), MVP 8(쿼터 증량 승인),
   20.2(GPU에서의 6시간 원본 처리 시간)은 실제 하드웨어·계정에서 측정해야 한다.
   이 저장소에는 그 측정을 돌릴 코드까지만 있다.
@@ -234,7 +238,7 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 101 tests, ffmpeg 불필요
+python -m unittest discover -s . -p "test_*.py"    # 110 tests, ffmpeg 불필요
 ```
 
 테스트는 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인 전체를 오프라인

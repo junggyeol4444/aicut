@@ -5,18 +5,19 @@
     "notes": "Starting point only. Every value listed under 'provisional' is an unmeasured guess kept solely so the pipeline can run before 17.4 has been executed. Run `aicut calibrate sweep` against a real source/output dataset and save a channel profile before trusting any output.",
     "eval_score": {},
     "provisional": [
-      "scan.pass1_window_sec",
+      "boundary_hints",
+      "discovery",
+      "laughter",
+      "pacing",
+      "retrieval",
       "scan.pass1_frame_interval_sec",
+      "scan.pass1_window_sec",
       "scan.pass2_trigger",
       "silence",
-      "tension",
       "situation",
-      "topic_shift",
-      "boundary_hints",
-      "pacing",
-      "discovery",
+      "tension",
       "thumbnail",
-      "retrieval"
+      "topic_shift"
     ]
   },
   "scan": {
@@ -149,5 +150,12 @@
     "daily_quota_units": 10000,
     "upload_cost_units": 1600,
     "quota_reset_timezone": "America/Los_Angeles"
+  },
+  "laughter": {
+    "detector": "loud_non_speech",
+    "loud_percentile": 0.92,
+    "min_duration_sec": 0.8,
+    "max_word_density": 0.7,
+    "merge_gap_sec": 0.5
   }
 }

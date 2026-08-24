@@ -368,6 +368,8 @@ def _markers(ctx: RunContext, start: float, end: float) -> list[str]:
                     and s.duration >= ctx.profile.get_float("pacing.cut_min_sec")]
     if long_silence:
         marks.append("long_silence")
+    if any(b.end_sec > start and b.start_sec < end for b in ctx.signals.bursts):
+        marks.append("vocal_burst")
     return marks
 
 

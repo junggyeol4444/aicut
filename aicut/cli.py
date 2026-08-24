@@ -217,10 +217,16 @@ def cmd_quota(args) -> int:
 
 
 def cmd_calibrate(args) -> int:
-    """17.4: sweep the parameters against a source/output dataset and save a profile."""
+    """17.4: measure a starting point, sweep, score, save the channel's profile."""
     from aicut.calibration import sweep
     from aicut.calibration.metrics import combined_score, score_content_discovery, score_pacing
 
+    if args.init:
+        return _calibrate_init(args)
+
+    if not (args.dataset and args.grid and args.harness):
+        print("a sweep needs --dataset, --grid and --harness (or use --init)", file=sys.stderr)
+        return 1
     dataset = json.loads(Path(args.dataset).read_text(encoding="utf-8"))
     base = _profile(args)
     grid = json.loads(Path(args.grid).read_text(encoding="utf-8"))
@@ -251,6 +257,42 @@ def cmd_calibrate(args) -> int:
     result.save_trials(out.with_suffix(".trials.json"))
     print(f"best score {result.best_score}: {result.best_params}")
     print(f"profile saved to {out}")
+    return 0
+
+
+def _calibrate_init(args) -> int:
+    """17.4 step 1: read a starting silence level off this channel's own audio.
+
+    Rather than adopting somebody else's -40 dB, take the level distribution of
+    a real broadcast from this setup and put the silence line low in it. Still a
+    starting point for the sweep, not a measurement of what sounds silent.
+    """
+    from aicut.calibration.sweep import initial_estimates
+    from aicut.pipeline.context import SignalBundle
+
+    store = _store(args)
+    project = store.get_project(args.project) if args.project else (store.list_projects() or [None])[-1]
+    if project is None:
+        print("no project to measure; run one first (its signals are cached)", file=sys.stderr)
+        return 1
+    cache = Path(args.workspace) / project.project_id / "signals.json"
+    if not cache.exists():
+        print(f"no cached signals for {project.project_id}", file=sys.stderr)
+        return 1
+
+    signals = SignalBundle.load(cache)
+    if not signals.rms:
+        print("the cached signals hold no RMS envelope to measure", file=sys.stderr)
+        return 1
+
+    estimates = initial_estimates(level for _, level in signals.rms)
+    profile = _profile(args).with_overrides(estimates, measured=estimates.keys())
+    profile.name = args.channel or f"{profile.name}-init"
+    out = Path(args.out or Path(args.workspace) / "profiles" / f"{profile.name}.json")
+    profile.save(out)
+    print(f"measured from {project.file_path}: {estimates}")
+    print(f"profile saved to {out}")
+    print("this is step 1 of 17.4; run the sweep before treating these as final")
     return 0
 
 
@@ -506,9 +548,12 @@ def build_parser() -> argparse.ArgumentParser:
     quota.set_defaults(func=cmd_quota)
 
     calibrate = sub.add_parser("calibrate", help="sweep parameters against a labelled dataset (17.4)")
-    calibrate.add_argument("--dataset", required=True, help="17.2 dataset json")
-    calibrate.add_argument("--grid", required=True, help="json of dotted parameter path -> values to try")
-    calibrate.add_argument("--harness", required=True, help="python file exposing run(profile, dataset)")
+    calibrate.add_argument("--init", action="store_true",
+                           help="17.4 step 1: measure starting values from a processed broadcast")
+    calibrate.add_argument("--project", help="which project's cached signals to measure (--init)")
+    calibrate.add_argument("--dataset", help="17.2 dataset json")
+    calibrate.add_argument("--grid", help="json of dotted parameter path -> values to try")
+    calibrate.add_argument("--harness", help="python file exposing run(profile, dataset)")
     calibrate.add_argument("--channel")
     calibrate.add_argument("--out")
     calibrate.set_defaults(func=cmd_calibrate)

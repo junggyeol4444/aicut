@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from aicut.analysis.tension import TensionCurve
+from aicut.analysis.vocalburst import VocalBurst
 from aicut.config import CalibrationProfile
 from aicut.db.store import Store
 from aicut.llm import Producer
@@ -30,6 +31,9 @@ class SignalBundle:
     tension: TensionCurve = field(default_factory=TensionCurve)
     motion: list[MotionSample] = field(default_factory=list)
     silences: list[Silence] = field(default_factory=list)
+    bursts: list[VocalBurst] = field(default_factory=list)
+    """Laughter/scream candidates (9.1). Empty means no detector ran, not that
+    the broadcast was joyless - the tension curve redistributes the weight."""
     faces: list[FaceReading] = field(default_factory=list)
     """Face readings from the sampled frames. Empty when no detector was available -
     callers must degrade rather than assume a value (5.3, 11.1)."""
@@ -49,6 +53,11 @@ class SignalBundle:
             "motion": [{"at_sec": round(m.at_sec, 3), "score": round(m.score, 4)} for m in self.motion],
             "silences": [{"start_sec": round(s.start_sec, 3), "end_sec": round(s.end_sec, 3)} for s in self.silences],
             "rms": [[round(t, 3), round(level, 2)] for t, level in self.rms],
+            "bursts": [
+                {"start_sec": round(b.start_sec, 3), "end_sec": round(b.end_sec, 3),
+                 "intensity": round(b.intensity, 4), "word_density": b.word_density}
+                for b in self.bursts
+            ],
             "faces": [
                 {"at_sec": round(f.at_sec, 3), "face_ratio": round(f.face_ratio, 4),
                  "face_count": f.face_count, "box": list(f.box) if f.box else None}
@@ -70,6 +79,13 @@ class SignalBundle:
             motion=[MotionSample(at_sec=m["at_sec"], score=m["score"]) for m in data.get("motion", [])],
             silences=[Silence(start_sec=s["start_sec"], end_sec=s["end_sec"]) for s in data.get("silences", [])],
             rms=[(float(t), float(level)) for t, level in data.get("rms", [])],
+            bursts=[
+                VocalBurst(
+                    start_sec=b["start_sec"], end_sec=b["end_sec"],
+                    intensity=b["intensity"], word_density=b.get("word_density", 0.0),
+                )
+                for b in data.get("bursts", [])
+            ],
             faces=[
                 FaceReading(
                     at_sec=f["at_sec"], face_ratio=f["face_ratio"],

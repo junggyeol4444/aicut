@@ -49,6 +49,8 @@
 ## 9장 — 스마트 페이싱
 
 - 9.1 두 종류의 정적 → `analysis/pacing.py`
+- 9.1 웃음/비명 → `analysis/vocalburst.py` (이 방송의 발화 레벨 대비 크고 단어 밀도 낮음).
+  검출기가 없으면 텐션의 laughter 가중치를 0점 주는 대신 재분배한다
 - 9.2 판정 신호 → `SilenceContext` (직전 텐션 / 화자 전환 / 화면 정지 / 컷 역할)
 - 9.3 KEEP·TRIM·CUT → `PacingMode`, `TB_EDIT_TIMELINE.pacing_mode`
 - 9.4 사람 완성본과 대조 → `calibration/metrics.py: score_pacing()`
@@ -95,6 +97,7 @@
 
 ## 17장 — 캘리브레이션
 
+- 17.4 1단계 실측 → `aicut calibrate --init` (캐시된 RMS 분포에서 무음 레벨 시작값)
 - 17.1 전면 외부화 → `config.py`. 프로파일에 없는 값을 읽으면 `ConfigError`
   (코드 기본값으로 대충 넘어가지 않는다)
 - 17.5 미측정 값은 확정값이 아님 → `provisional` / `measured` 마킹,

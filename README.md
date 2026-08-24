@@ -238,10 +238,10 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 128 tests
+python -m unittest discover -s . -p "test_*.py"    # 179 tests, 커버리지 87%
 ```
 
-110개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
+161개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
 전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
 자리비움, 지켜야 할 정적이 들어 있다.
 
@@ -258,7 +258,11 @@ python -m unittest discover -s . -p "test_*.py"    # 128 tests
 - 그리고 파이프라인 전체: 실제 다중트랙 파일을 넣어 컨테이너 판독, 무음 검출,
   버스트 검출, 렌더, 썸네일, 메타데이터까지 스스로 하게 두고 결과를 검사한다
 
-이 층이 잡은 것:
+YouTube API와 추론 프로바이더는 가짜 클라이언트로 검증한다 — 네트워크 없이
+쿼터 소진, PT 자정 재시도, 업로드 요청 본문(제목 100자·태그 30개 컷),
+재시도 백오프, 응답 파싱까지 실제로 실행된다.
+
+라이브·가짜 클라이언트 층이 잡은 것:
 
 1. concat 목록의 상대경로가 목록 파일 위치 기준으로 다시 풀려 경로가 중복됨.
    인자 배열만 보면 멀쩡해 보이는 종류.
@@ -266,3 +270,8 @@ python -m unittest discover -s . -p "test_*.py"    # 128 tests
    벽시계 60초, CPU 0.5초, 출력 0바이트). 그래서 sendcmd 전략은 고정 크롭 크기로
    **팬만 한다**. 배율이 변하는 줌은 `segment_crop`이 담당한다.
    scale 키프레임이 섞여 들어오면 조용히 무시하지 않고 경고하며 평탄화한다.
+3. `INSERT OR REPLACE`가 SQLite에서 기존 행을 삭제 후 삽입하므로
+   `ON DELETE CASCADE`가 자식 행을 같이 지운다 — 에피소드를 저장할 때마다
+   성과 데이터(루프 C)와 대기 중인 업로드가 조용히 사라지고 있었다. upsert로 교체.
+4. 쿼터 재시도가 실패할 때마다 큐에 **중복 행**을 쌓았다. 에피소드당 한 행으로 고정.
+5. 배열 응답 앞에 문장이 붙으면 JSON 추출이 안쪽 객체만 뽑아 배열이 잘렸다.

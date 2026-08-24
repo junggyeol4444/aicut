@@ -286,10 +286,18 @@ class Store:
 
     def upsert_candidates(self, project_id: str, candidates: Sequence[ContentCandidate]) -> None:
         self.conn.executemany(
-            "INSERT OR REPLACE INTO tb_content_candidate (candidate_id, project_id, core_summary,"
+            "INSERT INTO tb_content_candidate (candidate_id, project_id, core_summary,"
             " related_event_ids, required_context, required_context_sec, independence_score, density_score,"
             " has_resolution, decision, decision_reason, combine_with, human_verdict)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(candidate_id) DO UPDATE SET"
+            " project_id=excluded.project_id, core_summary=excluded.core_summary,"
+            " related_event_ids=excluded.related_event_ids, required_context=excluded.required_context,"
+            " required_context_sec=excluded.required_context_sec,"
+            " independence_score=excluded.independence_score, density_score=excluded.density_score,"
+            " has_resolution=excluded.has_resolution, decision=excluded.decision,"
+            " decision_reason=excluded.decision_reason, combine_with=excluded.combine_with,"
+            " human_verdict=excluded.human_verdict",
             [
                 (
                     c.candidate_id, project_id, c.core_summary, _j(c.related_event_ids), c.required_context,
@@ -324,11 +332,23 @@ class Store:
 
     # ---- episodes ----------------------------------------------------------
     def save_episode(self, episode: Episode) -> Episode:
+        # Upsert, never INSERT OR REPLACE: REPLACE deletes the existing row
+        # first, and ON DELETE CASCADE then takes every child with it - the
+        # performance rows of loop C and any queued upload would disappear
+        # every time an episode was saved again.
         self.conn.execute(
-            "INSERT OR REPLACE INTO tb_episode (episode_id, project_id, candidate_ids, title_candidates,"
+            "INSERT INTO tb_episode (episode_id, project_id, candidate_ids, title_candidates,"
             " planned_structure, target_type, planned_duration_sec, output_mp4_path, thumbnail_path,"
             " thumbnail_candidates, metadata, render_status, review_status, notes)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(episode_id) DO UPDATE SET"
+            " project_id=excluded.project_id, candidate_ids=excluded.candidate_ids,"
+            " title_candidates=excluded.title_candidates, planned_structure=excluded.planned_structure,"
+            " target_type=excluded.target_type, planned_duration_sec=excluded.planned_duration_sec,"
+            " output_mp4_path=excluded.output_mp4_path, thumbnail_path=excluded.thumbnail_path,"
+            " thumbnail_candidates=excluded.thumbnail_candidates, metadata=excluded.metadata,"
+            " render_status=excluded.render_status, review_status=excluded.review_status,"
+            " notes=excluded.notes",
             (
                 episode.episode_id, episode.project_id, _j(episode.candidate_ids), _j(episode.title_candidates),
                 _j(episode.planned_structure), episode.target_type, episode.planned_duration_sec,
@@ -498,8 +518,13 @@ class Store:
         return int(row["used"])
 
     def enqueue_upload(self, episode_id: str, retry_after: str | None, error: str, state: str = "RETRY_QUEUED") -> None:
+        """Queue an episode for retry, or refresh the entry it already has."""
         self.conn.execute(
-            "INSERT INTO tb_upload_queue (episode_id, state, retry_after, last_error, updated_at) VALUES (?,?,?,?,?)",
+            "INSERT INTO tb_upload_queue (episode_id, state, retry_after, last_error, updated_at)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(episode_id) DO UPDATE SET state=excluded.state,"
+            " retry_after=excluded.retry_after, last_error=excluded.last_error,"
+            " updated_at=excluded.updated_at",
             (episode_id, state, retry_after, error, _now()),
         )
         self.conn.commit()

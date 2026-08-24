@@ -127,9 +127,12 @@ def parse_json_block(text: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start, end = text.find(opener), text.rfind(closer)
-        if start != -1 and end > start:
+    # Try whichever bracket opens first. Preferring objects would read an array
+    # reply that carries a preamble as just its first element.
+    candidates = [(text.find(opener), opener, closer) for opener, closer in (("{", "}"), ("[", "]"))]
+    for start, opener, closer in sorted(c for c in candidates if c[0] != -1):
+        end = text.rfind(closer)
+        if end > start:
             try:
                 return json.loads(text[start : end + 1])
             except json.JSONDecodeError:

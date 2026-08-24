@@ -212,3 +212,6 @@ CREATE TABLE IF NOT EXISTS tb_upload_queue (
     last_error   TEXT NOT NULL DEFAULT '',
     updated_at   TEXT NOT NULL
 );
+-- One pending upload per episode: a retry that hits the quota again must update
+-- its own row, not stack a second one on every drain attempt.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_upload_queue_episode ON tb_upload_queue(episode_id);

@@ -202,8 +202,17 @@ CUT   파밍·이동·자리비움 — 통째로 제거
 ```bash
 aicut profile                                   # 지금 무엇이 추측값인지 확인
 aicut calibrate --init --channel mychannel      # 17.4 1단계: 내 방송의 실제 레벨 분포에서 시작값 측정
-aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel mychannel
+
+# 17.2 데이터셋 — 이 프로젝트의 병목
+aicut dataset init ds.json --source stream.mkv --transcript stream.json
+aicut dataset add-content ds.json --start 01:12:30 --end 01:19:05 --note "보스전"
+aicut dataset derive-silences ds.json --output-transcript 완성본.json
+
+aicut calibrate --dataset ds.json --channel mychannel    # 하네스 직접 안 써도 된다
+aicut profile --list                                     # 무엇을 언제 측정했나
 ```
+
+전체 절차는 `docs/calibration.md`.
 
 스윕이 측정한 파라미터는 `measured`로 승격되고 더 이상 경고를 띄우지 않는다.
 측정하지 않은 형제 파라미터는 계속 추측값으로 남는다.
@@ -239,10 +248,10 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 225 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 238 tests, 커버리지 90%
 ```
 
-196개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
+209개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
 전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
 자리비움, 지켜야 할 정적이 들어 있다.
 

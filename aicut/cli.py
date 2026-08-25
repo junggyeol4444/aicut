@@ -29,6 +29,16 @@ from aicut.render.editplan import EditPlan, describe
 
 DEFAULT_WORKSPACE = Path("workspace")
 
+# The parameters worth sweeping first: the ones 17.3 actually scores, and the
+# ones a channel's own material moves most. Override with --grid.
+DEFAULT_SWEEP_GRID = {
+    "silence.level_db": [-45.0, -40.0, -35.0, -30.0],
+    "pacing.keep_score_threshold": [0.3, 0.4, 0.5, 0.6],
+    "pacing.keep_max_sec": [2.5, 3.5, 4.5],
+    "pacing.cut_min_sec": [2.0, 2.5, 3.5],
+    "tension.high": [0.55, 0.62, 0.7],
+}
+
 
 # ---------------------------------------------------------------------------
 def _store(args) -> Store:
@@ -218,46 +228,53 @@ def cmd_quota(args) -> int:
 
 def cmd_calibrate(args) -> int:
     """17.4: measure a starting point, sweep, score, save the channel's profile."""
-    from aicut.calibration import sweep
-    from aicut.calibration.metrics import combined_score, score_content_discovery, score_pacing
+    from aicut.calibration import ReplayHarness, build_evaluator, sweep
+    from aicut.calibration.dataset import Dataset
 
     if args.init:
         return _calibrate_init(args)
 
-    if not (args.dataset and args.grid and args.harness):
-        print("a sweep needs --dataset, --grid and --harness (or use --init)", file=sys.stderr)
+    if not args.dataset:
+        print("a sweep needs --dataset (see `aicut dataset init`), or use --init", file=sys.stderr)
         return 1
-    dataset = json.loads(Path(args.dataset).read_text(encoding="utf-8"))
-    base = _profile(args)
-    grid = json.loads(Path(args.grid).read_text(encoding="utf-8"))
 
-    def evaluate(profile: CalibrationProfile) -> float:
-        # The dataset supplies human verdicts; the harness that replays this
-        # profile over the source lives in the project's own eval script and is
-        # imported here by path so the metric stays the shared part.
+    dataset = Dataset.load(args.dataset)
+    base = _profile(args)
+    grid = json.loads(Path(args.grid).read_text(encoding="utf-8")) if args.grid else DEFAULT_SWEEP_GRID
+    if not args.grid:
+        print(f"no --grid given; sweeping the default grid over {', '.join(grid)}")
+
+    if args.harness:
+        # An operator with their own replay keeps using it.
         from importlib import util
 
         spec = util.spec_from_file_location("aicut_eval_harness", args.harness)
         module = util.module_from_spec(spec)
         spec.loader.exec_module(module)                      # type: ignore[union-attr]
-        system = module.run(profile, dataset)
-        pacing = score_pacing(system["pacing_keeps"], dataset["pacing_keeps"]) if "pacing_keeps" in dataset else None
-        discovery = (
-            score_content_discovery(
-                [tuple(s) for s in system.get("content_spans", [])],
-                [tuple(s) for s in dataset.get("content_spans", [])],
-            )
-            if "content_spans" in dataset else None
+        evaluate = lambda profile: module.run(profile, dataset.to_dict())    # noqa: E731
+        harness = None
+    else:
+        harness = ReplayHarness(
+            dataset, workspace=Path(args.workspace), project_id=args.project,
+            producer=get_producer(args.producer),
         )
-        return combined_score(pacing, discovery)
+        evaluate = build_evaluator(harness)
 
-    result = sweep(base, grid, evaluate, channel_ref=args.channel or "")
+    try:
+        result = sweep(base, grid, evaluate, channel_ref=args.channel or dataset.channel_ref)
+    finally:
+        if harness is not None:
+            harness.close()
+
     out = Path(args.out or Path(args.workspace) / "profiles" / f"{result.profile.name}.json")
     result.profile.save(out)
     result.save_trials(out.with_suffix(".trials.json"))
     _record_profile(args, result.profile)
     print(f"best score {result.best_score}: {result.best_params}")
+    print(f"  {len(result.trials)} trials scored against {args.dataset}")
+    print(f"  {', '.join(dataset.coverage()['ready_for'])}")
     print(f"profile saved to {out}")
+    print(f"use it with: aicut --profile {out} run <source>")
     return 0
 
 
@@ -481,6 +498,111 @@ def cmd_ui(args) -> int:
     return 0
 
 
+def cmd_dataset(args) -> int:
+    """Build the labelled dataset of 17.2 - the thing every threshold waits on."""
+    from aicut.calibration.dataset import Dataset
+
+    path = Path(args.file)
+
+    if args.action == "init":
+        if path.exists() and not args.force:
+            print(f"{path} already exists; pass --force to start over", file=sys.stderr)
+            return 1
+        dataset = Dataset(
+            source_path=args.source or "",
+            transcript_path=args.transcript,
+            output_path=args.output,
+            channel_ref=args.channel or "",
+        )
+        if not dataset.source_path:
+            print("a dataset must name its source broadcast: --source <file>", file=sys.stderr)
+            return 1
+        dataset.save(path)
+        print(f"dataset created at {path}")
+        print("next: mark the stretches a person would make a video out of, with")
+        print(f"  aicut dataset add-content {path} --start 01:12:30 --end 01:19:05 --note '...'")
+        return 0
+
+    dataset = Dataset.load(path)
+
+    if args.action == "add-content":
+        span = dataset.add_content(_seconds(args.start), _seconds(args.end), args.note or "")
+        dataset.save(path)
+        print(f"content span {_hms(span.start_sec)}-{_hms(span.end_sec)} added"
+              f" ({len(dataset.content_spans)} total)")
+        return 0
+
+    if args.action == "add-silence":
+        verdict = dataset.add_silence_verdict(
+            _seconds(args.start), _seconds(args.end), kept=args.kept, note=args.note or ""
+        )
+        dataset.save(path)
+        print(f"silence {_hms(verdict.start_sec)}-{_hms(verdict.end_sec)}"
+              f" marked {'kept' if verdict.kept else 'cut'}")
+        return 0
+
+    if args.action == "derive-silences":
+        return _derive_silences(args, dataset, path)
+
+    _print({"dataset": dataset.to_dict(), "coverage": dataset.coverage()})
+    return 0
+
+
+def _derive_silences(args, dataset, path: Path) -> int:
+    """Read the pacing labels out of the human edit instead of typing them (12.3 B, 17.2)."""
+    from aicut.intelligence.source_output import align_by_transcript
+    from aicut.media.stt import TranscriptFileTranscriber
+    from aicut.pipeline.context import SignalBundle
+
+    if not dataset.transcript_path or not args.output_transcript:
+        print("deriving needs the source transcript in the dataset and --output-transcript",
+              file=sys.stderr)
+        return 1
+
+    store = _store(args)
+    source_resolved = str(Path(dataset.source_path).resolve())
+    project = next(
+        (p for p in reversed(store.list_projects())
+         if str(Path(p.file_path).resolve()) == source_resolved),
+        None,
+    )
+    if project is None:
+        print(f"run {dataset.source_path} once first so its silences are measured", file=sys.stderr)
+        return 1
+
+    cache = Path(args.workspace) / project.project_id / "signals.json"
+    if not cache.exists():
+        print(f"no cached signals for {project.project_id}", file=sys.stderr)
+        return 1
+
+    signals = SignalBundle.load(cache)
+    alignment = align_by_transcript(
+        TranscriptFileTranscriber(dataset.transcript_path).transcribe(),
+        TranscriptFileTranscriber(args.output_transcript).transcribe(),
+    )
+    verdicts = dataset.derive_silence_verdicts(signals.silences, alignment)
+    dataset.save(path)
+    kept = sum(1 for v in verdicts if v.kept)
+    print(f"derived {len(verdicts)} silence verdicts from the human edit: {kept} kept, {len(verdicts) - kept} cut")
+    print(f"  keep ratio of the edit itself: {alignment.keep_ratio:.2f}")
+    return 0
+
+
+def _seconds(value: str) -> float:
+    """Accept 91.5, 1:31.5 or 01:12:30."""
+    parts = str(value).split(":")
+    total = 0.0
+    for part in parts:
+        total = total * 60 + float(part)
+    return total
+
+
+def _hms(seconds: float) -> str:
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def cmd_benchmark(args) -> int:
     """Measure this machine against a real source (R3, 20.2).
 
@@ -639,9 +761,9 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--init", action="store_true",
                            help="17.4 step 1: measure starting values from a processed broadcast")
     calibrate.add_argument("--project", help="which project's cached signals to measure (--init)")
-    calibrate.add_argument("--dataset", help="17.2 dataset json")
-    calibrate.add_argument("--grid", help="json of dotted parameter path -> values to try")
-    calibrate.add_argument("--harness", help="python file exposing run(profile, dataset)")
+    calibrate.add_argument("--dataset", help="17.2 dataset json (see `aicut dataset`)")
+    calibrate.add_argument("--grid", help="json of dotted parameter path -> values (default: a built-in grid)")
+    calibrate.add_argument("--harness", help="optional: your own python file exposing run(profile, dataset)")
     calibrate.add_argument("--channel")
     calibrate.add_argument("--out")
     calibrate.set_defaults(func=cmd_calibrate)
@@ -677,6 +799,21 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--port", type=int, default=8765)
     ui.set_defaults(func=cmd_ui)
+
+    dataset = sub.add_parser("dataset", help="build the labelled calibration dataset (17.2)")
+    dataset.add_argument("action", choices=["init", "add-content", "add-silence", "derive-silences", "show"])
+    dataset.add_argument("file")
+    dataset.add_argument("--source", help="the broadcast this dataset labels")
+    dataset.add_argument("--transcript")
+    dataset.add_argument("--output", help="the video a human cut from it (17.2 b)")
+    dataset.add_argument("--output-transcript", help="its transcript, for derive-silences")
+    dataset.add_argument("--channel")
+    dataset.add_argument("--start", help="timestamp: 91.5, 1:31.5 or 01:12:30")
+    dataset.add_argument("--end")
+    dataset.add_argument("--note")
+    dataset.add_argument("--kept", action="store_true", help="add-silence: the human kept this pause")
+    dataset.add_argument("--force", action="store_true")
+    dataset.set_defaults(func=cmd_dataset)
 
     benchmark = sub.add_parser("benchmark", help="measure signal extraction on this machine (R3, 20.2)")
     benchmark.add_argument("source")

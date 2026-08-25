@@ -74,13 +74,6 @@ class Timeline:
                 return segment.out_start_sec + (source_sec - segment.source_start_sec)
         return None
 
-    def to_source(self, out_sec: float) -> tuple[int, float] | None:
-        """Inverse map: output second -> (sequence_order, source second)."""
-        for segment in self.segments:
-            if segment.out_start_sec <= out_sec <= segment.out_end_sec:
-                return (segment.sequence_order, segment.source_start_sec + (out_sec - segment.out_start_sec))
-        return None
-
     def cut_boundaries(self) -> list[float]:
         """Output times where one cut hands over to the next (chapter candidates)."""
         seen: set[int] = set()

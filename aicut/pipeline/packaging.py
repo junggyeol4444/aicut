@@ -32,6 +32,7 @@ def run(ctx: RunContext, episodes: list[Episode], *, knowledge: dict | None = No
 
 def package_episode(ctx: RunContext, episode: Episode, *, knowledge: dict | None = None) -> Episode:
     timeline = Timeline.from_cuts(episode.timeline)
+    boundaries = timeline.cut_boundaries()
     candidates = ctx.store.candidates(ctx.project.project_id)
     core = " / ".join(c.core_summary for c in candidates if c.candidate_id in episode.candidate_ids)
 
@@ -48,9 +49,11 @@ def package_episode(ctx: RunContext, episode: Episode, *, knowledge: dict | None
                 "sequence_order": c.sequence_order,
                 "scene_role": c.scene_role,
                 "speaker": c.speaker_tag,
-                "output_start_sec": timeline.to_output(c.source_start_sec, sequence_order=c.sequence_order) or 0.0,
+                # Where this cut begins in the finished video - the only places a
+                # chapter mark can honestly sit.
+                "output_start_sec": round(at, 2),
             }
-            for c in episode.timeline
+            for c, at in zip(sorted(episode.timeline, key=lambda c: c.sequence_order), boundaries)
         ],
         "subtitles": [{"at_sec": s.start_sec, "text": s.text} for s in episode.subtitles[:200]],
         "youtube_knowledge": knowledge or {},

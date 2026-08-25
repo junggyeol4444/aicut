@@ -238,10 +238,10 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 179 tests, 커버리지 87%
+python -m unittest discover -s . -p "test_*.py"    # 198 tests, 커버리지 88%
 ```
 
-161개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
+180개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
 전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
 자리비움, 지켜야 할 정적이 들어 있다.
 
@@ -275,3 +275,13 @@ YouTube API와 추론 프로바이더는 가짜 클라이언트로 검증한다 
    성과 데이터(루프 C)와 대기 중인 업로드가 조용히 사라지고 있었다. upsert로 교체.
 4. 쿼터 재시도가 실패할 때마다 큐에 **중복 행**을 쌓았다. 에피소드당 한 행으로 고정.
 5. 배열 응답 앞에 문장이 붙으면 JSON 추출이 안쪽 객체만 뽑아 배열이 잘렸다.
+6. 프로파일이 **아무도 안 읽는 파라미터 4개**를 광고하고 있었다. 17.1이
+   "판정 기준은 프로파일에" 라고 한 이상, 읽히지 않는 손잡이는 거짓말이다.
+7. `TB_CALIBRATION_PROFILE`(13장)에 **아무것도 안 쓰이고 있었다.** 캘리브레이션
+   결과가 파일로만 남고 DB엔 기록 안 됨. 이제 `aicut calibrate`가 기록하고
+   `aicut profile --list`로 조회한다.
+
+`tests/test_consistency.py`가 이 부류를 구조적으로 막는다: 안 읽히는 프로파일 키,
+프롬프트 없는 판단 태스크, 목 핸들러 없는 태스크, 아무것도 안 쓰는 테이블,
+도달 불가능한 상태, 호출자 없는 공개 함수, 부모 행에 대한 `INSERT OR REPLACE` —
+전부 테스트가 실패시킨다. 전부 실제로 이 저장소에 있었던 것들이다.

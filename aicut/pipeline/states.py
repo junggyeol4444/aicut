@@ -58,7 +58,3 @@ TERMINAL = {State.PUBLISHED, State.NO_CONTENT}
 
 def can_transition(current: State, target: State) -> bool:
     return target in _NEXT.get(current, set())
-
-
-def next_states(current: State) -> set[State]:
-    return set(_NEXT.get(current, set()))

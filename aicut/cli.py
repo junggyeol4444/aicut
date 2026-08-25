@@ -255,6 +255,7 @@ def cmd_calibrate(args) -> int:
     out = Path(args.out or Path(args.workspace) / "profiles" / f"{result.profile.name}.json")
     result.profile.save(out)
     result.save_trials(out.with_suffix(".trials.json"))
+    _record_profile(args, result.profile)
     print(f"best score {result.best_score}: {result.best_params}")
     print(f"profile saved to {out}")
     return 0
@@ -290,13 +291,38 @@ def _calibrate_init(args) -> int:
     profile.name = args.channel or f"{profile.name}-init"
     out = Path(args.out or Path(args.workspace) / "profiles" / f"{profile.name}.json")
     profile.save(out)
+    _record_profile(args, profile)
     print(f"measured from {project.file_path}: {estimates}")
     print(f"profile saved to {out}")
     print("this is step 1 of 17.4; run the sweep before treating these as final")
     return 0
 
 
+def _record_profile(args, profile: CalibrationProfile) -> str:
+    """Keep the profile in TB_CALIBRATION_PROFILE too (13장), not only as a file.
+
+    22.7 lists the channel profile as a deliverable, and 17.4 says a profile is
+    re-measured whenever the setup changes - so the history of what was measured
+    when has to live somewhere queryable, not only in whichever file was written
+    last.
+    """
+    return _store(args).save_profile(
+        name=profile.name,
+        channel_ref=args.channel or "",
+        params=profile.to_mapping(),
+        measured_at=profile.measured_at,
+        eval_score=profile.eval_score,
+    )
+
+
 def cmd_profile(args) -> int:
+    if args.list:
+        _print([
+            {"profile_id": row["profile_id"], "name": row["name"], "channel_ref": row["channel_ref"],
+             "measured_at": row["measured_at"], "eval_score": row["eval_score"]}
+            for row in _store(args).profiles()
+        ])
+        return 0
     profile = _profile(args)
     _print({
         "name": profile.name,
@@ -559,6 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.set_defaults(func=cmd_calibrate)
 
     prof = sub.add_parser("profile", help="show a calibration profile and what is still a guess")
+    prof.add_argument("--list", action="store_true", help="list the profiles measured so far (13장)")
     prof.set_defaults(func=cmd_profile)
 
     learn = sub.add_parser("learn", help="run a learning loop (12.3)")

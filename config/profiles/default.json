@@ -23,8 +23,6 @@
   "scan": {
     "pass1_window_sec": 120,
     "pass1_frame_interval_sec": 5,
-    "pass1_max_parallel_windows": 4,
-    "pass2_window_sec": 20,
     "pass2_frame_interval_sec": 0.5,
     "pass2_trigger": {
       "min_tension_peak": 0.55,
@@ -71,7 +69,6 @@
   },
   "pacing": {
     "preroll_tension_window_sec": 4.0,
-    "preroll_high_tension_keep": true,
     "speaker_switch_grace_sec": 1.2,
     "keep_max_sec": 3.5,
     "trim_target_sec": 0.45,
@@ -148,7 +145,6 @@
     "privacy_on_upload": "private",
     "require_human_review": true,
     "daily_quota_units": 10000,
-    "upload_cost_units": 1600,
     "quota_reset_timezone": "America/Los_Angeles"
   },
   "laughter": {

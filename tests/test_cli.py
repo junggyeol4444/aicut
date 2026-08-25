@@ -97,6 +97,46 @@ class CliTests(unittest.TestCase):
         code, _ = run("--workspace", str(self.workspace), "learn", "pairs")
         self.assertEqual(code, 1)
 
+    def test_calibrate_init_measures_from_a_run_and_records_the_profile(self):
+        """17.4 step 1, and 13장: the measured profile lands in the database too."""
+        from aicut.analysis.tension import TensionCurve
+        from aicut.db.store import Store as _Store
+        from aicut.models import Project
+        from aicut.pipeline.context import SignalBundle
+
+        store = _Store(self.workspace / "aicut.db")
+        project = store.create_project(Project(file_path="/fixture/stream.mkv", duration_sec=600))
+        signals = SignalBundle(
+            tension=TensionCurve(),
+            rms=[(float(i), -55.0 + (i % 40)) for i in range(400)],
+        )
+        signals.save(self.workspace / project.project_id / "signals.json")
+        store.close()
+
+        code, out = run("--workspace", str(self.workspace), "calibrate", "--init", "--channel", "mychannel")
+        self.assertEqual(code, 0)
+        self.assertIn("silence.level_db", out)
+        self.assertIn("step 1 of 17.4", out)
+
+        saved = json.loads((self.workspace / "profiles" / "mychannel.json").read_text(encoding="utf-8"))
+        self.assertIn("silence", saved["_meta"]["provisional"])
+        self.assertIn("silence.level_db", saved["_meta"]["measured"])
+
+        code, listed = run("--workspace", str(self.workspace), "profile", "--list")
+        self.assertEqual(code, 0)
+        rows = json.loads(listed)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "mychannel")
+        self.assertEqual(rows[0]["channel_ref"], "mychannel")
+
+    def test_calibrate_without_a_dataset_or_init_is_refused(self):
+        code, _ = run("--workspace", str(self.workspace), "calibrate")
+        self.assertEqual(code, 1)
+
+    def test_calibrate_init_without_a_processed_project_is_refused(self):
+        code, _ = run("--workspace", str(self.workspace), "calibrate", "--init")
+        self.assertEqual(code, 1)
+
     def test_candidates_screen_on_an_unknown_project(self):
         code, _ = run("--workspace", str(self.workspace), "candidates", "nope")
         self.assertEqual(code, 1)

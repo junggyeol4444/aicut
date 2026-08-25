@@ -189,6 +189,3 @@ class SceneIndex:
             denom = freq + self.K1 * (1 - self.B + self.B * length / max(self._avg_len, 1e-6))
             score += idf * (freq * (self.K1 + 1)) / denom
         return score
-
-    def by_event(self, event_id: str) -> list[Scene]:
-        return [s for s in self.scenes if event_id in s.event_ids]

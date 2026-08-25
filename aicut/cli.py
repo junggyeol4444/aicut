@@ -498,6 +498,54 @@ def cmd_ui(args) -> int:
     return 0
 
 
+def cmd_transcribe(args) -> int:
+    """Produce a transcript and stop (20.2).
+
+    STT is the one stage that wants a GPU, and it does not have to run where the
+    editing runs. Splitting it out means the transcript can be made on whatever
+    machine has the hardware and carried to the one that does the work - which
+    is also how the transcript for a source/output pair gets made (17.2).
+    """
+    from aicut.media.probe import probe
+    from aicut.media.stt import write_transcript
+
+    media = probe(args.source)
+    media.validate()
+    transcriber = _transcriber(args)
+    print(f"transcribing {args.source} ({media.duration_sec / 60:.1f} min) with {args.backend}")
+
+    import time
+
+    started = time.time()
+    utterances = transcriber.transcribe(args.source, media)
+    elapsed = time.time() - started
+
+    out = Path(args.out or Path(args.source).with_suffix(".transcript.json"))
+    write_transcript(utterances, out)
+    words = sum(len(u.words) for u in utterances)
+    factor = media.duration_sec / elapsed if elapsed else 0.0
+    print(f"  {len(utterances)} segments, {words} word timings, {elapsed:.1f}s ({factor:.1f}x realtime)")
+    if not words:
+        print("  WARNING: no word timings came out; pacing measures gaps between words and"
+              " subtitle timing depends on them")
+    print(f"  written to {out}")
+    return 0
+
+
+def _transcriber(args):
+    from aicut.media.stt import FasterWhisperTranscriber, WhisperXTranscriber
+
+    if args.backend == "faster-whisper":
+        return FasterWhisperTranscriber(
+            model_size=args.stt_model, device=args.device,
+            compute_type=args.compute_type, language=args.language,
+        )
+    return WhisperXTranscriber(
+        model_size=args.stt_model, device=args.device, language=args.language,
+        hf_token=args.hf_token, diarize=not args.no_diarize,
+    )
+
+
 def cmd_dataset(args) -> int:
     """Build the labelled dataset of 17.2 - the thing every threshold waits on."""
     from aicut.calibration.dataset import Dataset
@@ -696,11 +744,7 @@ def _importable(name: str) -> bool:
 
 
 def _whisperx(args):
-    from aicut.media.stt import WhisperXTranscriber
-
-    return WhisperXTranscriber(
-        model_size=args.stt_model, device=args.device, hf_token=args.hf_token, diarize=not args.no_diarize
-    )
+    return _transcriber(args)
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +766,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stop-after", choices=[s.value for s in State], default=None)
     run.add_argument("--no-render", action="store_true", help="stop after the edit plan (MVP 5)")
     run.add_argument("--frames", action="store_true", help="sample frames for the visual half of each pass")
+    run.add_argument("--backend", choices=["faster-whisper", "whisperx"], default="whisperx")
     run.add_argument("--stt-model", default="large-v3")
+    run.add_argument("--compute-type", default="int8")
+    run.add_argument("--language", default=None)
     run.add_argument("--device", default="cuda")
     run.add_argument("--hf-token", default=None)
     run.add_argument("--no-diarize", action="store_true")
@@ -799,6 +846,19 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--port", type=int, default=8765)
     ui.set_defaults(func=cmd_ui)
+
+    transcribe = sub.add_parser("transcribe", help="run STT and write a transcript (20.2)")
+    transcribe.add_argument("source")
+    transcribe.add_argument("-o", "--out")
+    transcribe.add_argument("--backend", choices=["faster-whisper", "whisperx"], default="faster-whisper",
+                            help="faster-whisper runs on a CPU; whisperx wants a GPU")
+    transcribe.add_argument("--stt-model", default="base")
+    transcribe.add_argument("--device", default="cpu")
+    transcribe.add_argument("--compute-type", default="int8")
+    transcribe.add_argument("--language", default=None)
+    transcribe.add_argument("--hf-token", default=None)
+    transcribe.add_argument("--no-diarize", action="store_true")
+    transcribe.set_defaults(func=cmd_transcribe)
 
     dataset = sub.add_parser("dataset", help="build the labelled calibration dataset (17.2)")
     dataset.add_argument("action", choices=["init", "add-content", "add-silence", "derive-silences", "show"])

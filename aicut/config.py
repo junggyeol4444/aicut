@@ -24,12 +24,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from aicut.errors import ConfigError, UnmeasuredParameterError
+from aicut.resources import PROFILE_DIR
 
 log = logging.getLogger(__name__)
 
 _MISSING = object()
 
-DEFAULT_PROFILE_PATH = Path(__file__).resolve().parent.parent / "config" / "profiles" / "default.json"
+DEFAULT_PROFILE_PATH = PROFILE_DIR / "default.json"
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:

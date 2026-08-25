@@ -18,6 +18,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from aicut.errors import AicutError
 from aicut.media.probe import MediaInfo
 from aicut.models import UNKNOWN_SPEAKER, Utterance
 
@@ -121,6 +122,111 @@ class WhisperXTranscriber(Transcriber):
             for seg in result.get("segments", []):
                 seg.setdefault("speaker", "HOST")
         return utterances_from_whisperx(result)
+
+
+class FasterWhisperTranscriber(Transcriber):
+    """faster-whisper, which runs on a CPU.
+
+    WhisperX gives the best word timings but assumes a GPU, and 20.2 leaves the
+    hardware open. This is the backend for a machine without one: slower, no
+    diarisation of its own, but it produces the word-level timestamps the pacing
+    and subtitle layers require, which is the part that cannot be given up.
+
+    Speakers come from the track layout (5.2) rather than from diarisation here:
+    with a multi-track recording that is already the better answer, and with a
+    single mixed track everything is tagged UNKNOWN and speaker-dependent
+    staging switches itself off (16장).
+    """
+
+    def __init__(
+        self,
+        model_size: str = "base",
+        *,
+        device: str = "cpu",
+        compute_type: str = "int8",
+        language: str | None = None,
+        beam_size: int = 5,
+        vad_filter: bool = True,
+        model=None,
+    ):
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
+        self.language = language
+        self.beam_size = beam_size
+        self.vad_filter = vad_filter
+        self._model = model
+
+    def _load(self):
+        if self._model is not None:
+            return self._model
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:  # pragma: no cover - optional dep
+            raise AicutError(
+                "faster-whisper is not installed; pip install faster-whisper, or supply a "
+                "transcript with --transcript"
+            ) from exc
+        self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+        return self._model
+
+    def transcribe(self, path: str, media: MediaInfo | None = None) -> list[Utterance]:
+        model = self._load()
+        segments, info = model.transcribe(
+            path,
+            language=self.language,
+            beam_size=self.beam_size,
+            vad_filter=self.vad_filter,
+            word_timestamps=True,       # required: pacing measures gaps between words
+        )
+        speaker = _speaker_from_tracks(media)
+        log.info("faster-whisper: language=%s", getattr(info, "language", "?"))
+        return [u for u in (_utterance_from_segment(seg, speaker) for seg in segments) if u is not None]
+
+
+def _speaker_from_tracks(media: MediaInfo | None) -> str:
+    """A single mic track means one known speaker; anything else is UNKNOWN (5.2)."""
+    if media is None:
+        return UNKNOWN_SPEAKER
+    speech = [t for t in media.audio_tracks if t.role in ("mic", "call", "mixed", "unknown")]
+    if len(speech) == 1 and speech[0].role == "mic":
+        return "HOST"
+    return UNKNOWN_SPEAKER
+
+
+def _utterance_from_segment(segment, speaker: str) -> Utterance | None:
+    text = (getattr(segment, "text", "") or "").strip()
+    if not text:
+        return None
+    words = [
+        {"word": (w.word or "").strip(), "start": w.start, "end": w.end, "score": getattr(w, "probability", None)}
+        for w in (getattr(segment, "words", None) or [])
+        if getattr(w, "start", None) is not None
+    ]
+    return Utterance(
+        start_sec=float(segment.start),
+        end_sec=float(segment.end),
+        text=text,
+        speaker=speaker,
+        words=words,
+        confidence=getattr(segment, "avg_logprob", None),
+    )
+
+
+def write_transcript(utterances: list[Utterance], path: str | Path) -> Path:
+    """Save in the WhisperX-shaped JSON the rest of the system reads."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({
+        "segments": [
+            {
+                "start": u.start_sec, "end": u.end_sec, "text": u.text,
+                "speaker": u.speaker, "track": u.track, "words": u.words,
+            }
+            for u in utterances
+        ]
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    return target
 
 
 def speaker_reliability(utterances: list[Utterance]) -> float:

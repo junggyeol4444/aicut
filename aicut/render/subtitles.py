@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from aicut.errors import ConfigError
+from aicut.resources import SUBTITLE_STYLE_DIR
 from aicut.models import SubtitleLine
 
-STYLE_DIR = Path(__file__).resolve().parent.parent.parent / "config" / "subtitle_styles"
+STYLE_DIR = SUBTITLE_STYLE_DIR
 
 _FIELD_ORDER = [
     "fontname", "fontsize", "primary_colour", "secondary_colour", "outline_colour", "back_colour",

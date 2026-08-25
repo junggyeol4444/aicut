@@ -27,4 +27,9 @@ aicut = "aicut.cli:main"
 include = ["aicut*"]
 
 [tool.setuptools.package-data]
-aicut = ["db/*.sql"]
+aicut = [
+    "db/*.sql",
+    "resources/profiles/*.json",
+    "resources/subtitle_styles/*.json",
+    "ui/static/*",
+]

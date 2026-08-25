@@ -36,10 +36,20 @@
 ## 설치
 
 ```bash
-pip install -e .                 # 코어는 표준 라이브러리 + ffmpeg CLI만 필요
-pip install -e '.[stt,vision,llm]'   # 단계별 선택 설치
+pip install .                    # 코어는 표준 라이브러리 + ffmpeg CLI만 필요
+pip install '.[stt,vision,llm]'  # 단계별 선택 설치
 aicut doctor                     # 20.2 사전 준비 항목 점검
 ```
+
+STT 백엔드 둘:
+
+```bash
+aicut transcribe stream.mkv                          # faster-whisper, CPU에서 돈다
+aicut transcribe stream.mkv --backend whisperx --device cuda --stt-model large-v3
+```
+
+STT는 GPU를 원하는 유일한 단계다. 분리해 뒀으니 장비 있는 기계에서 트랜스크립트만
+뽑아 옮겨도 된다. 17.2의 원본↔완성본 쌍 트랜스크립트도 이걸로 만든다.
 
 `ffmpeg` / `ffprobe`는 PATH에 있어야 한다.
 화자 분리(pyannote)는 HuggingFace 게이트 모델 승인이 선행되어야 한다 (20.2).
@@ -248,10 +258,10 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 238 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 255 tests, 커버리지 90%
 ```
 
-209개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
+224개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
 전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
 자리비움, 지켜야 할 정적이 들어 있다.
 
@@ -287,7 +297,11 @@ YouTube API와 추론 프로바이더는 가짜 클라이언트로 검증한다 
 5. 배열 응답 앞에 문장이 붙으면 JSON 추출이 안쪽 객체만 뽑아 배열이 잘렸다.
 6. 프로파일이 **아무도 안 읽는 파라미터 4개**를 광고하고 있었다. 17.1이
    "판정 기준은 프로파일에" 라고 한 이상, 읽히지 않는 손잡이는 거짓말이다.
-7. `TB_CALIBRATION_PROFILE`(13장)에 **아무것도 안 쓰이고 있었다.** 캘리브레이션
+7. **설치하면 아예 안 돌아갔다.** 캘리브레이션 프로파일·자막 스타일·UI 페이지가
+   패키지 밖에 있어서 `pip install`이 안 실어감. 저장소 안에서만 동작하는 프로그램이었다.
+   `aicut/resources/`로 옮기고, 설치본을 실제로 만들어 저장소 밖에서 실행하는
+   테스트를 뒀다.
+8. `TB_CALIBRATION_PROFILE`(13장)에 **아무것도 안 쓰이고 있었다.** 캘리브레이션
    결과가 파일로만 남고 DB엔 기록 안 됨. 이제 `aicut calibrate`가 기록하고
    `aicut profile --list`로 조회한다.
 

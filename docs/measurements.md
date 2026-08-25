@@ -53,6 +53,16 @@ OpenCV 5.0이 `CascadeClassifier`를 **제거**했다. `pip install opencv-pytho
 
 둘 다 없으면 `build_detector()`가 `None`을 돌려주고 5.3 라벨은 UNKNOWN으로 남는다.
 
+## 배포 형태
+
+`python -m build` 산출물 둘 다 필요한 파일을 싣는다: sdist·wheel 모두
+`aicut/resources/profiles/default.json`, `aicut/resources/subtitle_styles/default.json`,
+`aicut/db/schema.sql`, `aicut/ui/static/index.html` 포함. 설치본을 저장소 밖
+디렉터리에서 실행해 렌더와 UI까지 확인했다.
+
+한글·공백·대괄호가 섞인 경로(`한글 폴더 (test)/방송_2026-08-19 [하이라이트].mkv`)에서
+파이프라인 전체가 돌고 자막도 정상 번인된다(자막 구간 PSNR 7.0).
+
 ## 입력 검증
 
 | 입력 | 처리 |

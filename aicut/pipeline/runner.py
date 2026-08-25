@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 from aicut.config import CalibrationProfile
@@ -72,7 +72,11 @@ class Pipeline:
         channel_ref: str = "",
     ) -> Project:
         project = Project(
-            file_path=file_path,
+            # Absolute: the edit plan carries this path and is read back later,
+            # possibly from another directory (16장 re-runs the render alone).
+            # A relative path would resolve against whatever the working
+            # directory happened to be then.
+            file_path=str(Path(file_path).expanduser().resolve()),
             status=State.QUEUED.value,
             profile_name=self.profile.name,
             channel_ref=channel_ref,

@@ -258,7 +258,7 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 255 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 260 tests, 커버리지 90%
 ```
 
 224개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
@@ -275,6 +275,8 @@ python -m unittest discover -s . -p "test_*.py"    # 255 tests, 커버리지 90%
 - 2-pass 라우드니스가 목표치에 닿는가
 - 줌이 픽셀을 실제로 옮기는가 (파싱만 되는 게 아니라)
 - sendcmd 팬이 시간에 따라 화면을 옮기는가
+- `방송_2026-08-19 [하이라이트].mkv` 같은 경로에서 자막이 태워지는가 —
+  ASS 경로는 ffmpeg 필터 문자열로 들어가고 거기선 `:`와 따옴표가 문법이다
 - 그리고 파이프라인 전체: 실제 다중트랙 파일을 넣어 컨테이너 판독, 무음 검출,
   버스트 검출, 렌더, 썸네일, 메타데이터까지 스스로 하게 두고 결과를 검사한다
 
@@ -301,7 +303,10 @@ YouTube API와 추론 프로바이더는 가짜 클라이언트로 검증한다 
    패키지 밖에 있어서 `pip install`이 안 실어감. 저장소 안에서만 동작하는 프로그램이었다.
    `aicut/resources/`로 옮기고, 설치본을 실제로 만들어 저장소 밖에서 실행하는
    테스트를 뒀다.
-8. `TB_CALIBRATION_PROFILE`(13장)에 **아무것도 안 쓰이고 있었다.** 캘리브레이션
+8. 편집 계획의 `source_path`가 상대경로로 저장됐다. 다른 디렉터리에서
+   `aicut render <plan>` 하면 원본을 못 찾는다 — 16장의 "렌더만 재실행"이 깨진다.
+   1번과 같은 부류: 상대경로가 다른 문맥에서 다시 풀린다.
+9. `TB_CALIBRATION_PROFILE`(13장)에 **아무것도 안 쓰이고 있었다.** 캘리브레이션
    결과가 파일로만 남고 DB엔 기록 안 됨. 이제 `aicut calibrate`가 기록하고
    `aicut profile --list`로 조회한다.
 

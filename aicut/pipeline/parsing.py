@@ -14,7 +14,7 @@ from aicut.analysis.tension import build_tension_curve
 from aicut.analysis.vocalburst import build_detector
 from aicut.media import audio as audio_mod
 from aicut.media import vision as vision_mod
-from aicut.media.probe import probe
+from aicut.media.probe import probe, verify_tail
 from aicut.media.stt import Transcriber, speaker_reliability
 from aicut.pipeline.context import RunContext, SignalBundle
 
@@ -26,6 +26,14 @@ def run(ctx: RunContext, transcriber: Transcriber | None = None, *, use_cache: b
     # GPU box that did the measuring elsewhere) passes it in and skips decoding.
     if ctx.media is None:
         ctx.media = probe(ctx.project.file_path)
+    warnings = list(ctx.media.validate())
+    truncated = verify_tail(ctx.project.file_path, ctx.media.duration_sec)
+    if truncated:
+        warnings.append(truncated)
+    for warning in warnings:
+        log.warning("%s", warning)
+        ctx.report.setdefault("source_warnings", []).append(warning)
+
     if ctx.media.duration_sec:
         ctx.project.duration_sec = ctx.media.duration_sec
         ctx.store.set_duration(ctx.project.project_id, ctx.media.duration_sec)

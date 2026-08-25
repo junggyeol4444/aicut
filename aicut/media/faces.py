@@ -20,6 +20,7 @@ fabricated face ratio would be worse than no face ratio.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -56,25 +57,57 @@ def available() -> bool:
 
 
 class FaceDetector:
-    """Haar cascade face detection over sampled frames.
+    """Face detection over sampled frames, on whichever backend OpenCV offers.
 
-    A cascade is used rather than a DNN on purpose: this runs over every sampled
-    frame of a multi-hour broadcast, and the question being asked is coarse -
-    "is a face filling much of the screen" - not "who is this". A better detector
-    can be dropped in behind the same interface if 17.3 shows the labels are
-    wrong often enough to matter.
+    Two backends, because the answer changed under us: OpenCV 4.x ships a Haar
+    cascade and 5.0 removed ``CascadeClassifier`` entirely, so code written for
+    one silently detects nothing on the other. ``FaceDetectorYN`` (YuNet) is
+    preferred where a model file is available - it is a DNN and more accurate -
+    and the cascade is the fallback.
+
+    Either way the question being asked is coarse: "is a face filling much of
+    the screen", not "who is this". A better detector can be dropped in behind
+    this interface if 17.3 shows the labels are wrong often enough to matter.
     """
 
-    def __init__(self, cascade_path: str | None = None, *, scale_factor: float = 1.15, min_neighbors: int = 5):
+    def __init__(
+        self,
+        cascade_path: str | None = None,
+        *,
+        model_path: str | None = None,
+        scale_factor: float = 1.15,
+        min_neighbors: int = 5,
+        score_threshold: float = 0.6,
+    ):
         import cv2
 
         self._cv2 = cv2
-        path = cascade_path or str(Path(cv2.data.haarcascades) / _CASCADE)
-        self._cascade = cv2.CascadeClassifier(path)
-        if self._cascade.empty():
-            raise RuntimeError(f"could not load the face cascade at {path}")
+        self.backend = ""
+        self._cascade = None
+        self._yunet = None
         self.scale_factor = scale_factor
         self.min_neighbors = min_neighbors
+
+        model = model_path or os.environ.get("AICUT_FACE_MODEL")
+        if model and hasattr(cv2, "FaceDetectorYN") and Path(model).exists():
+            self._yunet = cv2.FaceDetectorYN.create(str(model), "", (320, 320), score_threshold)
+            self.backend = "yunet"
+            return
+
+        if hasattr(cv2, "CascadeClassifier"):
+            path = cascade_path or str(Path(cv2.data.haarcascades) / _CASCADE)
+            cascade = cv2.CascadeClassifier(path)
+            if cascade.empty():
+                raise RuntimeError(f"could not load the face cascade at {path}")
+            self._cascade = cascade
+            self.backend = "cascade"
+            return
+
+        raise RuntimeError(
+            f"OpenCV {cv2.__version__} has no usable face detector: CascadeClassifier was removed in 5.0 "
+            "and no YuNet model was supplied. Set AICUT_FACE_MODEL to a face_detection_yunet .onnx file, "
+            "or install opencv-python<5."
+        )
 
     def read_frame(self, image_path: str, at_sec: float) -> FaceReading:
         cv2 = self._cv2
@@ -82,25 +115,39 @@ class FaceDetector:
         if image is None:
             return FaceReading(at_sec=at_sec, face_ratio=0.0)
         height, width = image.shape[:2]
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        faces = self._cascade.detectMultiScale(gray, self.scale_factor, self.min_neighbors)
-        if len(faces) == 0:
+        boxes = self._detect(image, width, height)
+        if not boxes:
             return FaceReading(at_sec=at_sec, face_ratio=0.0)
-        biggest = max(faces, key=lambda f: f[2] * f[3])
-        x, y, w, h = (int(v) for v in biggest)
+        x, y, w, h = max(boxes, key=lambda b: b[2] * b[3])
         return FaceReading(
             at_sec=at_sec,
             face_ratio=(w * h) / float(width * height),
-            face_count=len(faces),
+            face_count=len(boxes),
             box=(x, y, w, h),
         )
+
+    def _detect(self, image, width: int, height: int) -> list[tuple[int, int, int, int]]:
+        cv2 = self._cv2
+        if self._yunet is not None:
+            self._yunet.setInputSize((width, height))
+            _, faces = self._yunet.detect(image)
+            if faces is None:
+                return []
+            return [(int(f[0]), int(f[1]), int(f[2]), int(f[3])) for f in faces]
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        found = self._cascade.detectMultiScale(gray, self.scale_factor, self.min_neighbors)
+        return [(int(x), int(y), int(w), int(h)) for x, y, w, h in found]
 
     def read_frames(self, frames: Sequence[tuple[float, str]]) -> list[FaceReading]:
         return [self.read_frame(path, at) for at, path in frames]
 
 
-def build_detector(cascade_path: str | None = None) -> "FaceDetector | None":
-    """A detector, or None when OpenCV is not installed. Never raises on absence."""
+def build_detector(cascade_path: str | None = None, *, model_path: str | None = None) -> "FaceDetector | None":
+    """A detector, or None when none can be built. Never raises on absence.
+
+    Returning None is the honest answer: the callers then leave the talk/gameplay
+    label UNKNOWN rather than guessing it (5.3).
+    """
     if not available():
         log.info(
             "OpenCV is not installed: talk/gameplay labelling stays UNKNOWN and the expression"
@@ -108,10 +155,12 @@ def build_detector(cascade_path: str | None = None) -> "FaceDetector | None":
         )
         return None
     try:
-        return FaceDetector(cascade_path)
+        detector = FaceDetector(cascade_path, model_path=model_path)
     except Exception as exc:
         log.warning("face detection unavailable (%s); continuing without the face signal", exc)
         return None
+    log.info("face detection backend: %s", detector.backend)
+    return detector
 
 
 def face_ratio_lookup(readings: Sequence[FaceReading]):

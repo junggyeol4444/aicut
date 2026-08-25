@@ -220,7 +220,8 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
   헤드리스에서 실제로 돌고 테스트되기 때문에 이 방식을 택했다.
   PyQt6 `QWebEngineView`나 Electron 셸이 같은 서버를 감싸면 UI 로직 변경 없이
   22.1의 "단일 실행 가능한 데스크톱 프로그램"이 된다.
-- **얼굴 인식 정밀도** — Haar cascade다 (`aicut run --frames`, OpenCV 필요).
+- **얼굴 인식 정밀도** — OpenCV 4.x면 Haar cascade, `AICUT_FACE_MODEL`에 YuNet
+  `.onnx`를 주면 DNN (`aicut run --frames`).
   "얼굴이 화면을 얼마나 채우는가" 수준의 거친 질문에만 답한다.
   OpenCV가 없으면 토크/게임 구분은 `UNKNOWN`으로 남는다 — 추측하지 않는다.
   표정 변화는 얼굴 박스의 이동·크기 변화로 대신한다(11.1). 랜드마크 모델 아님.
@@ -229,19 +230,19 @@ aicut calibrate --dataset ds.json --grid grid.json --harness eval.py --channel m
   웃음·비명·환호는 크고 단어가 없고, 흥분한 발화는 크고 단어가 많다는 구분이다.
   거칠다 — 길게 지르는 문장은 놓치고 큰 기침은 잡는다. 숨기지 않고 적어 둔다.
   진짜 분류기는 `VocalBurstDetector` 뒤에 그대로 갈아 끼운다.
-- **실측 대기** — MVP 6(10.4 줌 전략 선택), MVP 8(쿼터 증량 승인),
-  20.2(GPU에서의 6시간 원본 처리 시간)은 실제 하드웨어·계정에서 측정해야 한다.
-  이 저장소에는 그 측정을 돌릴 코드까지만 있다.
+- **실측 대기** — MVP 8(쿼터 증량 승인)과 20.2의 GPU STT 시간은 실제 계정·하드웨어가
+  필요하다. 나머지 실측은 `docs/measurements.md`에 끝냈다: 처리 시간(R3),
+  10.4 줌 전략 비교, 입력 검증. 자기 장비 숫자는 `aicut benchmark <원본>`으로 잰다.
 
 ---
 
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 198 tests, 커버리지 88%
+python -m unittest discover -s . -p "test_*.py"    # 225 tests, 커버리지 90%
 ```
 
-180개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
+196개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
 전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
 자리비움, 지켜야 할 정적이 들어 있다.
 

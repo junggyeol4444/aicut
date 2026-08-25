@@ -481,6 +481,68 @@ def cmd_ui(args) -> int:
     return 0
 
 
+def cmd_benchmark(args) -> int:
+    """Measure this machine against a real source (R3, 20.2).
+
+    R3 names processing time as an open risk and 20.2 lists measuring it as a
+    prerequisite, so the measurement is a command rather than a paragraph. What
+    it reports is the signal-extraction cost - the part that scales with source
+    length and runs on every project - and what that extrapolates to for a
+    six-hour broadcast on this hardware.
+    """
+    import time
+
+    from aicut.media import audio as audio_mod
+    from aicut.media import vision as vision_mod
+    from aicut.media.probe import probe
+
+    profile = _profile(args)
+    media = probe(args.source)
+    media.validate()
+    print(f"source: {args.source}")
+    print(f"  {media.duration_sec / 60:.1f} min, {media.width}x{media.height},"
+          f" {len(media.audio_tracks)} audio track(s)")
+
+    steps: dict[str, float] = {}
+
+    def timed(label: str, fn):
+        started = time.time()
+        result = fn()
+        steps[label] = time.time() - started
+        print(f"  {label:22s} {steps[label]:7.2f}s")
+        return result
+
+    silences = timed("silence detection", lambda: audio_mod.detect_silences(args.source, profile))
+    rms = timed("loudness envelope", lambda: audio_mod.rms_envelope(args.source))
+    motion = timed("visual change", lambda: vision_mod.motion_curve(
+        args.source, interval_sec=profile.get_float("scan.pass1_frame_interval_sec")))
+
+    if args.frames:
+        frames = timed("frame sampling", lambda: vision_mod.sample_frames(
+            args.source, Path(args.workspace) / "benchmark_frames",
+            start_sec=0, duration_sec=media.duration_sec,
+            interval_sec=profile.get_float("scan.pass1_frame_interval_sec")))
+        from aicut.media import faces as faces_mod
+
+        detector = faces_mod.build_detector()
+        if detector is not None:
+            timed("face detection", lambda: detector.read_frames([(f.at_sec, f.path) for f in frames]))
+        else:
+            print("  face detection         skipped (no detector available)")
+
+    total = sum(steps.values())
+    factor = media.duration_sec / total if total else 0.0
+    print()
+    print(f"  measured {len(silences)} silences, {len(rms)} loudness frames, {len(motion)} motion samples")
+    print(f"  total {total:.1f}s for {media.duration_sec / 60:.1f} min of source ({factor:.1f}x realtime)")
+    if factor:
+        print(f"  a six-hour broadcast would take about {6 * 3600 / factor / 60:.1f} min of signal extraction"
+              " on this machine")
+    print("  STT and the reasoning passes are extra and dominate on a real run;"
+          " measure those on the hardware that will run them (20.2).")
+    return 0
+
+
 def cmd_doctor(args) -> int:
     """Check the preconditions of 20.2 before a run rather than during one."""
     checks = {
@@ -615,6 +677,12 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--port", type=int, default=8765)
     ui.set_defaults(func=cmd_ui)
+
+    benchmark = sub.add_parser("benchmark", help="measure signal extraction on this machine (R3, 20.2)")
+    benchmark.add_argument("source")
+    benchmark.add_argument("--frames", action="store_true",
+                           help="also time frame sampling and face detection")
+    benchmark.set_defaults(func=cmd_benchmark)
 
     doctor = sub.add_parser("doctor", help="check the prerequisites of 20.2")
     doctor.set_defaults(func=cmd_doctor)

@@ -75,6 +75,9 @@ aicut run stream.mkv --producer anthropic
 # 5. 사람 검수 게이트 — 이걸 통과하지 않으면 공개되지 않는다 (11.3)
 aicut review <episode-id> approve --reviewer me
 
+# 중간에 실패했으면 — 이해한 것은 그대로 두고 이어서 (16장)
+aicut resume <project-id>
+
 # 6. 쿼터 상태와 다음 PT 자정 리셋 시각 (11.4)
 aicut quota
 
@@ -131,6 +134,12 @@ QUEUED → PARSING → UNDERSTANDING → DISCOVERING → EVALUATING
 | RENDERING | 편집 계획만 읽고 실행. 판단 없음 | 10장 |
 | PACKAGED | 썸네일 후보 추출, 제목/설명/태그/챕터 | 11장 |
 | REVIEW_PENDING | 사람 검수 게이트 (필수) | 11.3 |
+
+1차 통과가 실행 비용의 대부분이다 — 6시간 방송이면 창마다 추론 1회, 약 180회.
+뒷단계에서 실패했다고 그 값을 다시 치르면 16장의 단계 분리가 의미가 없다.
+`aicut resume <project>`는 저장된 창 요약과 사건 그래프를 재사용하고 그 뒤만
+다시 판단한다 — 프로파일을 다시 재거나 사람 판단이 바뀌면 결과가 달라져야 하므로.
+30분 소스 실측: 56초 걸리던 재실행이 **0.37초**.
 
 조작 화면은 `aicut ui` (15.1의 4단계 플로우: 입력 / 진행 / 후보 검토 / 결과).
 localhost 전용이고 인증이 없다 — 포트를 외부에 열지 말 것.
@@ -258,7 +267,7 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 260 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 265 tests, 커버리지 90%
 ```
 
 224개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인

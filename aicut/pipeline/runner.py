@@ -93,6 +93,7 @@ class Pipeline:
         sample_frames: bool = False,
         render: bool = True,
         context: RunContext | None = None,
+        resume: bool = False,
     ) -> RunResult:
         started = time.time()
         ctx = context or RunContext(
@@ -111,7 +112,19 @@ class Pipeline:
                 return self._finish(ctx, State.PARSING, [], started)
 
             self._advance(ctx, State.UNDERSTANDING)
-            understanding.run(ctx, sample_frames=sample_frames)
+            if resume and self._understanding_done(ctx):
+                # The first pass is the expensive half of a run: one reasoning
+                # call per window, 180 of them on a six-hour broadcast. Paying
+                # for it again because a later stage failed would make 16장's
+                # stage separation meaningless.
+                log.info(
+                    "resuming: reusing %d window summaries and %d events already stored",
+                    len(ctx.store.windows(ctx.project.project_id)),
+                    len(ctx.store.events(ctx.project.project_id)),
+                )
+                ctx.note("resumed_from", State.UNDERSTANDING.value)
+            else:
+                understanding.run(ctx, sample_frames=sample_frames)
             if stop_after is State.UNDERSTANDING:
                 return self._finish(ctx, State.UNDERSTANDING, [], started)
 
@@ -160,6 +173,25 @@ class Pipeline:
             return self._finish(ctx, State.FAILED, [], started, record_state=False)
 
     # ---- helpers -----------------------------------------------------------
+    def _understanding_done(self, ctx: RunContext) -> bool:
+        """Is there a usable event graph already stored for this project?"""
+        return bool(ctx.store.windows(ctx.project.project_id)) and bool(
+            ctx.store.events(ctx.project.project_id)
+        )
+
+    def resume(self, project_id: str, **kwargs: Any) -> RunResult:
+        """Continue a project that stopped part way (16장).
+
+        Understanding is reused when it is already stored; everything after it
+        is decided again, because those stages are cheap and their inputs may
+        have changed - a re-tuned profile, a corrected human verdict.
+        """
+        project = self.store.get_project(project_id)
+        if project is None:
+            raise PipelineError(f"unknown project {project_id}")
+        kwargs.setdefault("resume", True)
+        return self.run(project, **kwargs)
+
     def _advance(self, ctx: RunContext, state: State) -> None:
         self.store.set_status(ctx.project.project_id, state.value)
         ctx.project.status = state.value
@@ -235,6 +267,8 @@ def build_report(ctx: RunContext, state: State, episodes: list[Episode]) -> dict
         "length_deviations": ctx.report.get("length_deviations", []),
         "render_failures": ctx.report.get("render_failures", []),
         "no_content_reason": ctx.report.get("no_content_reason"),
+        "resumed_from": ctx.report.get("resumed_from"),
+        "source_warnings": ctx.report.get("source_warnings", []),
         "elapsed_sec": ctx.report.get("elapsed_sec"),
         "profile": ctx.report.get("profile"),
         "producer": ctx.report.get("producer"),

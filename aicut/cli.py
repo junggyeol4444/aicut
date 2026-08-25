@@ -114,6 +114,33 @@ def cmd_run(args) -> int:
     return 0 if result.final_state is not State.FAILED else 1
 
 
+def cmd_resume(args) -> int:
+    """Continue a project that stopped part way, without re-deciding what it knows."""
+    pipeline = _pipeline(args)
+    project = pipeline.store.get_project(args.project)
+    if project is None:
+        print(f"unknown project {args.project}", file=sys.stderr)
+        return 1
+
+    windows = len(pipeline.store.windows(args.project))
+    events = len(pipeline.store.events(args.project))
+    print(f"resuming {args.project} from {project.status}")
+    if windows and events:
+        print(f"  reusing {windows} window summaries and {events} events already understood")
+    else:
+        print("  nothing understood yet; this will read the broadcast from the start")
+
+    result = pipeline.resume(
+        args.project,
+        transcriber=TranscriptFileTranscriber(args.transcript) if args.transcript else None,
+        render=not args.no_render,
+    )
+    print(f"\n{args.project} -> {result.final_state.value}")
+    for episode in result.report.get("episodes", []):
+        print(f"  [{episode['target_type'] or '?'}] {episode['duration_sec']}s, {episode['cuts']} cuts")
+    return 0 if result.final_state is not State.FAILED else 1
+
+
 def cmd_status(args) -> int:
     store = _store(args)
     if args.project:
@@ -774,6 +801,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--hf-token", default=None)
     run.add_argument("--no-diarize", action="store_true")
     run.set_defaults(func=cmd_run)
+
+    resume = sub.add_parser("resume", help="continue a project that stopped part way (16장)")
+    resume.add_argument("project")
+    resume.add_argument("--transcript")
+    resume.add_argument("--no-render", action="store_true")
+    resume.set_defaults(func=cmd_resume)
 
     status = sub.add_parser("status", help="list projects or show one")
     status.add_argument("project", nargs="?")

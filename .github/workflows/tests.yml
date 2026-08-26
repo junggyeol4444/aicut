@@ -77,12 +77,19 @@ jobs:
           python-version: "3.11"
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        # Homebrew split the formula: the plain `ffmpeg` bottle links no
+        # libass, so it has no `subtitles` filter and cannot burn a caption.
+        # ffmpeg-full does. The suite tolerates either (it degrades and skips),
+        # but this job is only worth running against a build that can do the
+        # whole job.
+        run: brew install ffmpeg-full || brew install ffmpeg
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg --no-progress -y
       - name: Install OpenCV
         run: pip install --quiet "opencv-python-headless<5"
+      - name: Say what this ffmpeg can actually do
+        run: python -m aicut.cli doctor
       - name: Run the whole suite
         run: python -m unittest discover -s . -p "test_*.py"
       - name: A Korean path must survive this platform's console

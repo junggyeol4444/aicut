@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 
 from aicut.errors import RenderError
+from aicut.media.ffmpeg_util import LIBASS_HINT, has_filter
 from aicut.models import Episode
 from aicut.pipeline.context import RunContext
 from aicut.render.editplan import EditPlan
@@ -54,6 +55,25 @@ def render_episode(ctx: RunContext, episode: Episode, plan_path: str | Path | No
             style,
             title=episode.title_candidates[0] if episode.title_candidates else episode.episode_id,
         )
+
+    if ass_path and not has_filter("subtitles"):
+        # A working ffmpeg that was built without libass - the plain Homebrew
+        # bottle, most static builds. Losing the whole episode over captions
+        # would be the wrong trade, so the video is rendered without them and
+        # the .ass stays on disk beside it; 2.6 says a departure is reported,
+        # never silent, so it goes in the report and on the episode.
+        note = (
+            f"captions were NOT burned in: this ffmpeg has no 'subtitles' filter. "
+            f"The subtitle file is kept at {ass_path} - re-run the render alone after "
+            f"installing a build with libass to get them. {LIBASS_HINT}"
+        )
+        log.warning("%s: %s", episode.episode_id, note)
+        episode.notes = f"{episode.notes}\n{note}".strip()
+        ctx.report.setdefault("degraded", []).append(
+            {"episode_id": episode.episode_id, "reason": "no_subtitles_filter",
+             "detail": note, "subtitle_file": str(ass_path)}
+        )
+        ass_path = None
 
     out_path = ctx.project_dir / "output" / f"{episode.episode_id}.mp4"
     renderer = Renderer(ctx.profile, ctx.project_dir / "work")

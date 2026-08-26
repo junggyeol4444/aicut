@@ -14,11 +14,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from aicut.config import CalibrationProfile
 from aicut.db.store import Store
 from aicut.llm import get_producer
-from aicut.media.ffmpeg_util import have_ffmpeg
+from aicut.media.ffmpeg_util import has_filter, have_ffmpeg
 from aicut.media.stt import TranscriptFileTranscriber
 from aicut.pipeline.runner import Pipeline
 from aicut.pipeline.states import State
@@ -137,6 +138,35 @@ class AwkwardPathTests(unittest.TestCase):
             os.chdir(cwd)
         self.assertTrue(Path(episode.output_mp4_path).exists())
 
+    def test_a_build_without_libass_still_produces_the_video_and_says_so(self):
+        """Homebrew's plain ffmpeg bottle has no libass, so no 'subtitles' filter.
+
+        Losing a whole episode over captions would be the wrong trade: render
+        without them, keep the .ass beside the output, and report the departure
+        (2.6) instead of shipping a quietly caption-less video.
+        """
+        from aicut.pipeline import rendering
+        from aicut.pipeline.context import RunContext
+
+        episode = self.store.episodes(self.project.project_id)[0]
+        ctx = RunContext(
+            project=self.store.get_project(self.project.project_id), store=self.store,
+            profile=CalibrationProfile.load().with_overrides(
+                {"render.video.preset": "ultrafast", "render.video.crf": 35}, measured=[]),
+            producer=get_producer("mock"), workspace=self.workspace,
+        )
+        with mock.patch.object(rendering, "has_filter", return_value=False):
+            rendering.render_episode(ctx, episode)
+
+        self.assertTrue(Path(episode.output_mp4_path).exists(), "the video was lost over captions")
+        degraded = ctx.report.get("degraded", [])
+        self.assertEqual(len(degraded), 1, "the departure was not reported")
+        self.assertEqual(degraded[0]["reason"], "no_subtitles_filter")
+        self.assertTrue(Path(degraded[0]["subtitle_file"]).exists(),
+                        "the subtitle file must survive for a later re-render")
+        self.assertIn("NOT burned in", episode.notes)
+
+    @unittest.skipUnless(has_filter("subtitles"), "this ffmpeg was built without libass")
     def test_subtitles_burn_in_despite_the_brackets_and_spaces(self):
         """The ASS path goes into an ffmpeg filter string, where ':' and quotes
         are syntax. A silently unescaped path renders a video with no captions."""

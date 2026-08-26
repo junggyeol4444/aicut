@@ -32,7 +32,7 @@ from typing import Any, Sequence
 from aicut.config import CalibrationProfile
 from aicut.errors import RenderError
 from aicut.media.audio import LoudnessStats, measure_loudness
-from aicut.media.ffmpeg_util import require_ffmpeg, run
+from aicut.media.ffmpeg_util import LIBASS_HINT, require_ffmpeg, require_filter, run
 from aicut.render.editplan import EditPlan
 from aicut.render.timeline import Segment, Timeline
 
@@ -309,6 +309,13 @@ class Renderer:
         keep_intermediate: bool = False,
     ) -> Path:
         require_ffmpeg()
+        if ass_path:
+            # Checked here rather than at the final command: by then the
+            # segments have been cut and joined, and the failure reads as a
+            # mysterious render error instead of a missing build option.
+            require_filter(
+                "subtitles", needed_for="burning subtitles (10.3)", install_hint=LIBASS_HINT
+            )
         settings = RenderSettings.from_profile(self.profile, target_type=plan.target_type)
         timeline = Timeline.from_cuts(plan.cuts)
         if not timeline.segments:

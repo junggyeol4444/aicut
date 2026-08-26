@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -211,6 +212,113 @@ def _utterance_from_segment(segment, speaker: str) -> Utterance | None:
         words=words,
         confidence=getattr(segment, "avg_logprob", None),
     )
+
+
+class PocketSphinxTranscriber(Transcriber):
+    """CMU PocketSphinx, whose acoustic model ships inside the package.
+
+    Accuracy is poor and it is English-only, so this is not the backend to
+    produce a channel's transcripts with. It earns its place because it needs
+    no download and no GPU: it is the one engine that can be run anywhere,
+    which makes it the way to check that a real recogniser's output - word
+    timings and all - flows through the pipeline, rather than a fixture that
+    was shaped to fit.
+
+    Use ``faster-whisper`` or WhisperX for anything real (20.1).
+    """
+
+    def __init__(self, *, sample_rate: int = 16000, decoder=None):
+        self.sample_rate = sample_rate
+        self._decoder = decoder
+
+    def _load(self):
+        if self._decoder is not None:
+            return self._decoder
+        try:
+            from pocketsphinx import Decoder
+        except ImportError as exc:  # pragma: no cover - optional dep
+            raise AicutError("pocketsphinx is not installed; pip install pocketsphinx") from exc
+        self._decoder = Decoder(logfn=os.devnull)
+        return self._decoder
+
+    def transcribe(self, path: str, media: MediaInfo | None = None) -> list[Utterance]:
+        decoder = self._load()
+        audio = self._mono_pcm(path)
+        decoder.start_utt()
+        decoder.process_raw(audio, False, True)
+        decoder.end_utt()
+
+        speaker = _speaker_from_tracks(media)
+        words = [
+            {"word": seg.word, "start": seg.start_frame / 100.0, "end": seg.end_frame / 100.0}
+            for seg in decoder.seg()
+            if seg.word not in _SPHINX_NOISE
+        ]
+        return group_words_into_utterances(words, speaker=speaker)
+
+    def _mono_pcm(self, path: str) -> bytes:
+        """16 kHz mono PCM, which is all this decoder accepts."""
+        from aicut.media.ffmpeg_util import require_ffmpeg, run
+        import subprocess
+
+        require_ffmpeg()
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-v", "error", "-i", path,
+             "-ac", "1", "-ar", str(self.sample_rate), "-f", "s16le", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if result.returncode != 0:
+            raise AicutError(f"could not extract audio from {path}: "
+                             f"{result.stderr.decode('utf-8', 'replace')[-300:]}")
+        return result.stdout
+
+
+_SPHINX_NOISE = {"<s>", "</s>", "<sil>", "[SPEECH]", "[NOISE]", "(NULL)", "++UH++", "++UM++"}
+
+
+def group_words_into_utterances(
+    words: list[dict],
+    *,
+    speaker: str = UNKNOWN_SPEAKER,
+    max_gap_sec: float = 0.8,
+) -> list[Utterance]:
+    """Turn a flat word stream into utterances, splitting on pauses.
+
+    A recogniser that returns words without sentence boundaries still has to
+    produce the units the rest of the system reads. The pause between words is
+    the only boundary available, and it is the same signal 9장 judges - which is
+    why the threshold here is deliberately loose: this splits transcript lines,
+    it does not decide what a beat is.
+    """
+    utterances: list[Utterance] = []
+    current: list[dict] = []
+
+    def flush() -> None:
+        if not current:
+            return
+        text = " ".join(_clean_word(w["word"]) for w in current).strip()
+        if text:
+            utterances.append(Utterance(
+                start_sec=float(current[0]["start"]),
+                end_sec=float(current[-1]["end"]),
+                text=text,
+                speaker=speaker,
+                words=[{"word": _clean_word(w["word"]), "start": w["start"], "end": w["end"]}
+                       for w in current],
+            ))
+        current.clear()
+
+    for word in sorted(words, key=lambda w: float(w["start"])):
+        if current and float(word["start"]) - float(current[-1]["end"]) > max_gap_sec:
+            flush()
+        current.append(word)
+    flush()
+    return utterances
+
+
+def _clean_word(word: str) -> str:
+    """Drop the pronunciation-variant suffix Sphinx appends: ``the(2)``."""
+    return word.split("(")[0].strip()
 
 
 def write_transcript(utterances: list[Utterance], path: str | Path) -> Path:

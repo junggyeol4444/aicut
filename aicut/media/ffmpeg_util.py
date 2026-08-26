@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import sys
+from functools import lru_cache
 from typing import Sequence
 
 from aicut.errors import RenderError
@@ -19,6 +21,53 @@ def have_ffmpeg() -> bool:
 def require_ffmpeg() -> None:
     if not have_ffmpeg():
         raise RenderError("ffmpeg and ffprobe must be on PATH (20.1)")
+
+
+@lru_cache(maxsize=None)
+def available_filters() -> frozenset[str]:
+    """Filters this ffmpeg build actually has.
+
+    Builds differ in what they were compiled with, and the difference is not
+    academic: a homebrew ffmpeg without libass has no `subtitles` filter at
+    all, so burning captions fails with "No such filter" after the render has
+    already done its work.
+    """
+    if not have_ffmpeg():
+        return frozenset()
+    try:
+        output = run(["ffmpeg", "-hide_banner", "-filters"], timeout=30)
+    except (RenderError, OSError):
+        return frozenset()
+    names = set()
+    for line in output.splitlines():
+        parts = line.split()
+        # " T.. name  in->out  description"
+        if len(parts) >= 3 and not line.startswith(" ---") and parts[0].isalpha() is False:
+            names.add(parts[1])
+    return frozenset(names)
+
+
+def has_filter(name: str) -> bool:
+    return name in available_filters()
+
+
+#: How to get a build with libass on each platform. Homebrew split its formula:
+#: plain `ffmpeg` no longer links libass, so the most common macOS install
+#: produces a working ffmpeg that cannot burn a single caption.
+LIBASS_HINT = {
+    "darwin": "Homebrew's plain `ffmpeg` bottle is built without libass. "
+              "`brew install ffmpeg-full` (or `brew reinstall --build-from-source ffmpeg`) has it.",
+    "win32": "Install a full build: `choco install ffmpeg-full`, or the 'full' build from gyan.dev.",
+}.get(sys.platform, "Install the full ffmpeg package (Debian/Ubuntu: `sudo apt install ffmpeg`).")
+
+
+def require_filter(name: str, *, needed_for: str, install_hint: str) -> None:
+    """Fail before the work, with the fix, when a build lacks what we need."""
+    if has_filter(name):
+        return
+    raise RenderError(
+        f"this ffmpeg build has no '{name}' filter, which {needed_for} requires.\n{install_hint}"
+    )
 
 
 def run(cmd: Sequence[str], *, capture_stderr: bool = True, timeout: float | None = None) -> str:

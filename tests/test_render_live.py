@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from aicut.config import CalibrationProfile
-from aicut.media.ffmpeg_util import have_ffmpeg
+from aicut.media.ffmpeg_util import has_filter, have_ffmpeg
 from aicut.models import Cut, Episode, PacingMode, SubtitleLine
 from aicut.render.editplan import EditPlan
 from aicut.render.ffmpeg import Renderer
@@ -125,6 +125,7 @@ class LiveRenderTests(unittest.TestCase):
             os.chdir(cwd)
         self.assertAlmostEqual(_probe_duration(out), 4.0, delta=0.25)
 
+    @unittest.skipUnless(has_filter("subtitles"), "this ffmpeg was built without libass")
     def test_subtitles_are_burned_in_where_the_plan_puts_them(self):
         episode = Episode(project_id="p", timeline=[Cut(0, 0.0, 6.0)])
         episode.subtitles = [SubtitleLine(0.5, 2.5, "BURNED IN", emphasis=True)]

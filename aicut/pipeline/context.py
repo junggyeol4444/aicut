@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from aicut.analysis.tension import TensionCurve
+from aicut.errors import AicutError
 from aicut.analysis.vocalburst import VocalBurst
 from aicut.config import CalibrationProfile
 from aicut.db.store import Store
@@ -121,8 +122,20 @@ class RunContext:
 
     @property
     def project_dir(self) -> Path:
+        """Where this project's outputs go, created on first use.
+
+        A workspace that cannot be written is reported as what it is rather
+        than as an OSError from whichever stage happened to touch it first.
+        """
         path = self.workspace / self.project.project_id
-        path.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except (NotADirectoryError, FileExistsError) as exc:
+            raise AicutError(f"{self.workspace} is not a usable workspace directory") from exc
+        except PermissionError as exc:
+            raise AicutError(f"cannot write to the workspace {self.workspace}") from exc
+        except OSError as exc:
+            raise AicutError(f"cannot create {path}: {exc}") from exc
         return path
 
     @property

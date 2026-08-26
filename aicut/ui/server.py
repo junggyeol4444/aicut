@@ -50,6 +50,12 @@ log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# The UI's requests are small - a path, a verdict, a reviewer's name. A body
+# larger than this is a mistake or a stray client, and reading it into memory
+# on the strength of a header the sender chose is how a local tool becomes a
+# way to exhaust the machine.
+MAX_BODY_BYTES = 4 * 1024 * 1024
+
 
 class UiServer:
     """Holds the workspace and dispatches API calls. Transport-agnostic."""
@@ -62,7 +68,12 @@ class UiServer:
         producer_name: str = "mock",
     ):
         self.workspace = Path(workspace)
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        try:
+            self.workspace.mkdir(parents=True, exist_ok=True)
+        except (NotADirectoryError, FileExistsError) as exc:
+            raise AicutError(f"{self.workspace} is not a usable workspace directory") from exc
+        except PermissionError as exc:
+            raise AicutError(f"cannot write to the workspace {self.workspace}") from exc
         self.profile_path = profile_path
         self.producer_name = producer_name
         self.jobs = JobRunner()
@@ -359,8 +370,23 @@ class _Handler(BaseHTTPRequestHandler):
         self._dispatch("GET")
 
     def do_POST(self) -> None:      # noqa: N802
-        length = int(self.headers.get("Content-Length") or 0)
+        header = self.headers.get("Content-Length") or "0"
+        try:
+            length = int(header)
+        except ValueError:
+            self._send(400, {"error": f"Content-Length is not a number: {header!r}"})
+            return
+        if length < 0:
+            self._send(400, {"error": "Content-Length is negative"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send(413, {"error": f"request body of {length} bytes exceeds the {MAX_BODY_BYTES} byte limit"})
+            return
+
         raw = self.rfile.read(length) if length else b"{}"
+        if len(raw) < length:
+            self._send(400, {"error": "the request body ended before Content-Length said it would"})
+            return
         try:
             body = json.loads(raw or b"{}")
         except json.JSONDecodeError:

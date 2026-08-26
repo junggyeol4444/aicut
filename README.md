@@ -243,6 +243,8 @@ aicut profile --list                                     # 무엇을 언제 측�
 
 정직하게 적는다.
 
+- **UI 인증** — `aicut ui`는 localhost 전용이고 인증이 없다. 요청 본문 크기는
+  4MB로 제한하지만, 포트를 외부에 열면 누구나 조작할 수 있다. 열지 말 것.
 - **PyQt6 / Electron 래퍼 (20.1)** — 15장의 네 화면은 `aicut ui`로 구현되어 있으나,
   전달 방식이 기획안이 적은 데스크톱 래퍼가 아니라 로컬 HTTP 서버 + 정적 페이지다.
   헤드리스에서 실제로 돌고 테스트되기 때문에 이 방식을 택했다.
@@ -267,7 +269,7 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 265 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 276 tests, 커버리지 90%
 ```
 
 224개는 ffmpeg 없이 돈다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인

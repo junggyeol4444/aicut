@@ -114,7 +114,7 @@ class _FakeAnthropicModule(types.ModuleType):
 class AnthropicProducerTests(unittest.TestCase):
     def setUp(self):
         self._saved = sys.modules.get("anthropic")
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.dir = Path(self._tmp.name)
 
     def tearDown(self):

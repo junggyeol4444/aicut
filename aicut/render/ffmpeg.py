@@ -192,7 +192,10 @@ def build_segment_command(
     filters: list[str] = []
     if effect.get("type") == "zoom":
         if settings.zoom_strategy == "sendcmd" and sendcmd_path:
-            filters.append(f"sendcmd=f={sendcmd_path}")
+            # Same escaping as the subtitle path: this is a filter argument, and
+            # a Windows command file at C:\... would otherwise end the option
+            # at the drive colon.
+            filters.append(f"sendcmd=f='{_escape_filter_path(sendcmd_path)}'")
             filters.append(zoom_filter(effect, settings))
         else:
             filters.append(zoom_filter(effect, settings))
@@ -255,7 +258,12 @@ def build_final_command(
     """Burn subtitles and apply the measured loudness correction (10.4-3)."""
     video_filters: list[str] = []
     if ass_path:
-        subtitle = f"subtitles='{_escape_filter_path(ass_path)}'"
+        # `filename=` is named rather than passed positionally: ffmpeg 7.2 (the
+        # homebrew build) rejects `subtitles='<path>'` with "No option name
+        # near", where 6.x and 7.1 accepted it. Naming the option works on all
+        # of them, and the failure it avoids is a render that dies rather than
+        # one that quietly ships without captions.
+        subtitle = f"subtitles=filename='{_escape_filter_path(ass_path)}'"
         if fonts_dir:
             subtitle += f":fontsdir='{_escape_filter_path(fonts_dir)}'"
         video_filters.append(subtitle)

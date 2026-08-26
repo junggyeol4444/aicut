@@ -28,7 +28,7 @@ def sample_plan() -> EditPlan:
 class EditPlanTests(unittest.TestCase):
     def test_round_trip_through_json(self):
         plan = sample_plan()
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = plan.save(Path(tmp) / "plan.json")
             reloaded = EditPlan.load(path)
         self.assertEqual([c.source_start_sec for c in reloaded.cuts], [1800.0, 30.0, 2400.0])

@@ -49,7 +49,7 @@ class FailingAtDiscovery(CountingProducer):
 
 class ResumeTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.dir = Path(self._tmp.name)
         self.store = Store(self.dir / "aicut.db")
         self.profile = CalibrationProfile.load()

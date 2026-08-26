@@ -84,7 +84,7 @@ class InstalledPackageTests(unittest.TestCase):
     """Build and install into a throwaway environment, then run it from elsewhere."""
 
     def test_a_fresh_install_can_load_its_own_resources(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             venv = Path(tmp) / "venv"
             subprocess.run([sys.executable, "-m", "venv", venv], check=True,
                            capture_output=True, timeout=180)
@@ -114,7 +114,7 @@ class InstalledPackageTests(unittest.TestCase):
             self.assertTrue(result["font"])
 
     def test_the_console_script_is_installed_and_works(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             venv = Path(tmp) / "venv"
             subprocess.run([sys.executable, "-m", "venv", venv], check=True,
                            capture_output=True, timeout=180)

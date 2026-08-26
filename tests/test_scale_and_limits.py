@@ -85,7 +85,7 @@ class SixHourScaleTests(unittest.TestCase):
             tension=build_tension_curve(self.rms, [], self.profile),
             motion=self.motion, silences=self.silences, rms=self.rms,
         )
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = bundle.save(Path(tmp) / "signals.json")
             megabytes = path.stat().st_size / 1e6
             reloaded = SignalBundle.load(path)
@@ -95,7 +95,7 @@ class SixHourScaleTests(unittest.TestCase):
 
     def test_a_window_of_speech_is_read_without_loading_the_broadcast(self):
         """The first pass reads window by window; that must stay indexed."""
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = Store(Path(tmp) / "db.sqlite")
             try:
                 project = store.create_project(
@@ -124,7 +124,7 @@ class WorkspaceGuardTests(unittest.TestCase):
         from aicut.llm import get_producer
         from aicut.pipeline.context import RunContext
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             blocker = Path(tmp) / "workspace"
             blocker.write_text("not a directory", encoding="utf-8")
             store = Store()
@@ -143,7 +143,7 @@ class WorkspaceGuardTests(unittest.TestCase):
     def test_the_ui_refuses_a_workspace_it_cannot_use(self):
         from aicut.ui.server import UiServer
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             blocker = Path(tmp) / "ws"
             blocker.write_text("not a directory", encoding="utf-8")
             with self.assertRaises(AicutError):
@@ -158,7 +158,7 @@ class RequestLimitTests(unittest.TestCase):
     def setUpClass(cls):
         from aicut.ui.server import serve
 
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.httpd, cls.ui = serve(Path(cls._tmp.name), port=0)
         cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
         import threading

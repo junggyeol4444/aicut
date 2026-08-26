@@ -26,7 +26,7 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(profile.get_float("render.audio.loudness.integrated_lufs"), -14.0)
 
     def test_channel_profile_layers_over_the_default(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = Path(tmp) / "channel.json"
             path.write_text(json.dumps({
                 "_meta": {"name": "ch", "measured": ["silence.level_db"]},

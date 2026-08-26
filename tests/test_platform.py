@@ -49,7 +49,7 @@ class FilterPathTests(unittest.TestCase):
             ass_path=r"C:\ws\s.ass", fonts_dir=r"C:\Windows\Fonts",
         )
         filters = cmd[cmd.index("-vf") + 1]
-        self.assertIn("subtitles='C\\:/ws/s.ass'", filters)
+        self.assertIn("subtitles=filename='C\\:/ws/s.ass'", filters)
         self.assertIn("fontsdir='C\\:/Windows/Fonts'", filters)
 
 

@@ -20,7 +20,7 @@ from aicut.models import Episode, Event, EventMention, Project
 
 class ConcurrencyTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.path = Path(self._tmp.name) / "aicut.db"
         self.store = Store(self.path)
         self.project = self.store.create_project(Project(file_path="/f.mkv", duration_sec=100))

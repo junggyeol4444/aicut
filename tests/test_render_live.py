@@ -63,7 +63,7 @@ def _frame(video: Path, at_sec: float, out: Path, crop: str = "scale=640:360") -
 class LiveRenderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.dir = Path(cls._tmp.name)
         cls.source = cls.dir / "src.mkv"
         # A source whose picture changes every second, so a frame identifies its

@@ -33,7 +33,7 @@ def _catalogue(count: int = 3) -> dict:
 
 class ReferenceLoopTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.store = Store(Path(self._tmp.name) / "db.sqlite")
         self.ledger = QuotaLedger(self.store)
         self.client = FakeYouTubeClient(self.ledger, catalogue=_catalogue())
@@ -138,7 +138,7 @@ class ReferenceLoopTests(unittest.TestCase):
         self.assertIn("not rules", summary["caveat"])
 
     def test_knowledge_round_trips_through_a_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = Path(tmp) / "knowledge.json"
             ProductionKnowledge(sample_size=4, title_patterns=["question"]).save(path)
             loaded = ProductionKnowledge.load(path)

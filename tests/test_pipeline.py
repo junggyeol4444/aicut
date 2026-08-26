@@ -19,7 +19,7 @@ from tests import fixtures
 
 class PipelineHarness(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.workspace = Path(self._tmp.name)
         self.store = Store(self.workspace / "aicut.db")
         self.profile = CalibrationProfile.load()
@@ -84,7 +84,10 @@ class RunTests(PipelineHarness):
         self.assertEqual(len(plans), len(result.episodes))
 
         plan = EditPlan.load(plans[0])
-        self.assertEqual(plan.source_path, "/fixture/stream.mkv")
+        # submit() resolves the source, so the recorded path is absolute and
+        # platform-shaped - D:\fixture\stream.mkv on Windows.
+        self.assertTrue(Path(plan.source_path).is_absolute())
+        self.assertEqual(Path(plan.source_path).name, "stream.mkv")
         self.assertTrue(plan.cuts)
         self.assertEqual(
             [c.sequence_order for c in plan.cuts], list(range(len(plan.cuts))),

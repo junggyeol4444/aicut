@@ -61,7 +61,10 @@ class SegmentCommandTests(unittest.TestCase):
         audio = cmd[cmd.index("-af") + 1]
         self.assertIn("measured_I=-21.0", audio)
         self.assertIn("linear=true", audio)
-        self.assertIn("subtitles=", cmd[cmd.index("-vf") + 1])
+        video_filter = cmd[cmd.index("-vf") + 1]
+        self.assertIn("subtitles=filename='/s.ass'", video_filter)
+        self.assertNotIn("subtitles='", video_filter,
+                         "ffmpeg 7.2 rejects the positional form with 'No option name near'")
 
     def test_shorts_get_a_vertical_frame(self):
         settings = RenderSettings.from_profile(CalibrationProfile.load(), target_type="shorts")

@@ -20,14 +20,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Hide ffmpeg
-        # ubuntu-latest ships ffmpeg, so without this the job would quietly run
-        # the live tests and prove nothing about the offline half. The README
-        # tells people they can run the suite without ffmpeg; this checks it.
+      - name: Make sure ffmpeg is not on PATH
+        # The runner image may or may not carry ffmpeg - it did not, the first
+        # time this ran, and moving a binary that was not there failed the job
+        # before a single test executed. Hide it when present, and either way
+        # assert the state this job depends on.
         run: |
-          sudo mv "$(command -v ffmpeg)" /usr/local/bin/ffmpeg.hidden
-          sudo mv "$(command -v ffprobe)" /usr/local/bin/ffprobe.hidden
-          ! command -v ffmpeg
+          for tool in ffmpeg ffprobe; do
+            path="$(command -v "$tool" || true)"
+            if [ -n "$path" ]; then
+              echo "hiding $path"
+              sudo mv "$path" "$path.hidden"
+            fi
+          done
+          if command -v ffmpeg; then
+            echo "ffmpeg is still reachable; this job would prove nothing" >&2
+            exit 1
+          fi
+          echo "ffmpeg is absent, as this job requires"
 
       - name: Run the suite without ffmpeg
         run: python -m unittest discover -s . -p "test_*.py"

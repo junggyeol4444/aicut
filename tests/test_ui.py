@@ -31,7 +31,7 @@ def _request(url: str, body: dict | None = None):
 class UiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.workspace = Path(cls._tmp.name)
         cls.httpd, cls.ui = serve(cls.workspace, port=0)
         cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"

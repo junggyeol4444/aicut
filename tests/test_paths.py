@@ -52,7 +52,7 @@ def _frame(video: Path, at_sec: float, out: Path) -> Path:
 class AwkwardPathTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.root = Path(cls._tmp.name) / AWKWARD_DIR
         cls.root.mkdir(parents=True)
         cls.source = cls.root / AWKWARD_FILE
@@ -149,7 +149,7 @@ class AwkwardPathTests(unittest.TestCase):
         cut = min(plan.cuts, key=lambda c: c.sequence_order)
         source_at = cut.source_start_sec + line.start_sec + 0.3
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             burned = _psnr(
                 _frame(output, line.start_sec + 0.3, Path(tmp) / "out.png"),
                 _frame(Path(plan.source_path), source_at, Path(tmp) / "src.png"),

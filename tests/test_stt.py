@@ -119,7 +119,7 @@ class TranscriptRoundTripTests(unittest.TestCase):
         ])
         original = FasterWhisperTranscriber(model=model).transcribe("/f.mkv", _media("mic"))
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = write_transcript(original, Path(tmp) / "out.json")
             reloaded = TranscriptFileTranscriber(path).transcribe()
 
@@ -129,7 +129,7 @@ class TranscriptRoundTripTests(unittest.TestCase):
         self.assertEqual(reloaded[1].start_sec, 10.0)
 
     def test_the_written_shape_is_the_one_the_loader_expects(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = write_transcript(
                 FasterWhisperTranscriber(model=_fake_model([
                     _segment(0, 1, "hi", [_word("hi", 0, 1)])

@@ -77,7 +77,7 @@ def _write_transcript(path: Path) -> None:
 class LivePipelineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.dir = Path(cls._tmp.name)
         cls.source = cls.dir / "stream.mkv"
         cls.transcript = cls.dir / "transcript.json"

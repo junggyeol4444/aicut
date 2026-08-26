@@ -99,6 +99,26 @@ class UiServer:
                 self._stores.append(store)
         return store
 
+    def release_thread_store(self) -> None:
+        """Close this thread's connection, if it opened one.
+
+        ThreadingHTTPServer runs one thread per request, so without this every
+        request leaks a connection for the life of the server. On Windows the
+        leak is louder than a leak: the open handles keep the database file
+        locked, and the workspace cannot be removed.
+        """
+        store = getattr(self._local, "store", None)
+        if store is None:
+            return
+        self._local.store = None
+        with self._stores_lock:
+            if store in self._stores:
+                self._stores.remove(store)
+        try:
+            store.close()
+        except Exception:                     # a connection already gone
+            pass
+
     def profile(self) -> CalibrationProfile:
         return CalibrationProfile.load(self.profile_path)
 
@@ -367,7 +387,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- verbs ---------------------------------------------------------------
     def do_GET(self) -> None:       # noqa: N802
-        self._dispatch("GET")
+        try:
+            self._dispatch("GET")
+        finally:
+            self.ui.release_thread_store()
 
     def do_POST(self) -> None:      # noqa: N802
         header = self.headers.get("Content-Length") or "0"
@@ -395,7 +418,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self._send(400, {"error": "request body must be a JSON object"})
             return
-        self._dispatch("POST", body)
+        try:
+            self._dispatch("POST", body)
+        finally:
+            self.ui.release_thread_store()
 
 
 def serve(

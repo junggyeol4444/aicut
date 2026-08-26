@@ -110,7 +110,7 @@ class ProducerConsistencyTests(unittest.TestCase):
 
 class SchemaConsistencyTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.store = Store(pathlib.Path(self._tmp.name) / "db.sqlite")
 
     def tearDown(self):

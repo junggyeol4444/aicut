@@ -18,7 +18,7 @@ class ChunkedEventGraphTests(unittest.TestCase):
     """A 12-hour source is folded in chunks, then merged - not truncated."""
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.workspace = Path(self._tmp.name)
         self.store = Store(self.workspace / "db.sqlite")
         self.profile = CalibrationProfile.load()

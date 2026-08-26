@@ -65,7 +65,7 @@ def _draw_gameplay(path: Path, size=(640, 360)) -> None:
 class FaceDetectorLiveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.dir = Path(cls._tmp.name)
         cls.face = cls.dir / "face.png"
         cls.big_face = cls.dir / "big_face.png"
@@ -140,7 +140,7 @@ class FaceOnSampledFramesTests(unittest.TestCase):
     def test_frames_sampled_from_a_video_carry_a_face_signal(self):
         from aicut.media.vision import sample_frames
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             work = Path(tmp)
             frame = work / "f.png"
             _draw_face(frame, size=(640, 360), radius=(140, 160))

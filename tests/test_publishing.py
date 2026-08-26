@@ -24,7 +24,7 @@ from tests.fake_youtube import FakeYouTubeClient
 
 class PublishingTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.dir = Path(self._tmp.name)
         self.store = Store(self.dir / "db.sqlite")
         self.profile = CalibrationProfile.load()
@@ -175,7 +175,7 @@ class PerformanceLoopTests(unittest.TestCase):
     """12.3 C, and the 4.2 rule that retention exists only for your own videos."""
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.dir = Path(self._tmp.name)
         self.store = Store(self.dir / "db.sqlite")
         self.ledger = QuotaLedger(self.store)

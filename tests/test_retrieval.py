@@ -73,7 +73,7 @@ class DiscoveryRuleTests(unittest.TestCase):
                     "independence_score": 0.9, "density_score": 0.9, "has_resolution": True,
                 }]
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = Store(Path(tmp) / "db.sqlite")
             project = store.create_project(Project(file_path="/f.mkv", duration_sec=100))
             event = Event(project_id=project.project_id, summary="something real")

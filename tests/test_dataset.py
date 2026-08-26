@@ -25,7 +25,7 @@ class DatasetTests(unittest.TestCase):
         dataset = Dataset(source_path="/s.mkv", channel_ref="mychannel")
         dataset.add_content(100, 340, "the boss fight")
         dataset.add_silence_verdict(50, 52, kept=True, note="stunned")
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = dataset.save(Path(tmp) / "ds.json")
             reloaded = Dataset.load(path)
         self.assertEqual(reloaded.channel_ref, "mychannel")
@@ -114,7 +114,7 @@ class ReplayHarnessTests(unittest.TestCase):
         from aicut.pipeline.states import State
         from tests import fixtures
 
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.dir = Path(self._tmp.name)
         self.store = Store(self.dir / "aicut.db")
         self.profile = CalibrationProfile.load()

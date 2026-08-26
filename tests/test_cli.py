@@ -20,7 +20,7 @@ def run(*argv: str) -> tuple[int, str]:
 
 class CliTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.workspace = Path(self._tmp.name)
 
     def tearDown(self):

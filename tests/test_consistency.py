@@ -219,3 +219,62 @@ class DeadCodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfflineGuardTests(unittest.TestCase):
+    """The README says the suite runs without ffmpeg. This keeps that true.
+
+    A stage that shells out unconditionally breaks it silently: the tests that
+    guard media work still skip, but the ones that feed pre-measured signals
+    start failing, and only on a machine without ffmpeg - which is nobody's
+    machine here. It has already happened once, when tail verification was
+    added to parsing.
+    """
+
+    def test_parsing_only_touches_the_file_when_it_probed_it(self):
+        import inspect
+
+        from aicut.pipeline import parsing
+
+        source = inspect.getsource(parsing.run)
+        self.assertIn("inspect_file", source)
+        probe_line = source.index("ctx.media = probe(")
+        for call in ("verify_tail(", ".validate()"):
+            with self.subTest(call=call):
+                self.assertIn(call, source)
+                self.assertGreater(
+                    source.index(call), probe_line,
+                    f"{call} runs before the probe guard, so a supplied media object cannot skip it",
+                )
+
+    def test_no_stage_shells_out_at_import_time(self):
+        """Importing a module must never require ffmpeg to exist."""
+        import importlib
+        import pkgutil
+
+        import aicut
+
+        for module in pkgutil.walk_packages(aicut.__path__, prefix="aicut."):
+            name = module.name
+            if name.endswith(("anthropic_provider", "youtube")):
+                continue                      # optional third-party imports, guarded at call time
+            if name.endswith("__main__"):
+                continue                      # importing it runs the CLI, by design
+            with self.subTest(module=name):
+                importlib.import_module(name)
+
+    def test_the_media_helpers_declare_their_requirement(self):
+        """Every ffmpeg-dependent entry point asks for it explicitly, so the
+        failure names the missing tool instead of surfacing as FileNotFoundError."""
+        import inspect
+
+        from aicut.media import audio, probe, vision
+
+        for module, functions in (
+            (audio, ["detect_silences", "rms_envelope", "measure_loudness"]),
+            (vision, ["sample_frames", "motion_curve"]),
+            (probe, ["probe"]),
+        ):
+            for name in functions:
+                with self.subTest(function=f"{module.__name__}.{name}"):
+                    self.assertIn("require_ffmpeg()", inspect.getsource(getattr(module, name)))

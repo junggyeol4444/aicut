@@ -1,0 +1,109 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  offline:
+    # The bulk of the suite needs nothing but the stdlib, so it runs first and
+    # fast: a broken import or a logic regression should not wait on apt.
+    name: offline (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Hide ffmpeg
+        # ubuntu-latest ships ffmpeg, so without this the job would quietly run
+        # the live tests and prove nothing about the offline half. The README
+        # tells people they can run the suite without ffmpeg; this checks it.
+        run: |
+          sudo mv "$(command -v ffmpeg)" /usr/local/bin/ffmpeg.hidden
+          sudo mv "$(command -v ffprobe)" /usr/local/bin/ffprobe.hidden
+          ! command -v ffmpeg
+
+      - name: Run the suite without ffmpeg
+        run: python -m unittest discover -s . -p "test_*.py"
+
+      - name: The media tests must have skipped, not silently vanished
+        run: |
+          python - <<'PY'
+          import re, subprocess, sys
+          out = subprocess.run(
+              [sys.executable, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py", "-v"],
+              capture_output=True, text=True,
+          ).stderr
+          skipped = len(re.findall(r"\.\.\. skipped", out))
+          ran = len(re.findall(r"\.\.\. ok", out))
+          print(f"ran {ran}, skipped {skipped}")
+          assert skipped >= 20, f"only {skipped} tests skipped without ffmpeg; the guards are not working"
+          assert ran >= 200, f"only {ran} tests ran offline"
+          PY
+
+  full:
+    # ffmpeg and OpenCV present: the live render, pipeline, face and path tests
+    # stop skipping. These are the ones that caught the concat path bug, the
+    # sendcmd stall and the unescaped subtitle path.
+    name: with ffmpeg and OpenCV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install optional analysis dependencies
+        run: pip install --quiet "opencv-python-headless<5"
+      - name: Run the whole suite
+        run: python -m unittest discover -s . -p "test_*.py"
+      - name: Report what actually ran
+        run: |
+          python - <<'PY'
+          import subprocess
+          out = subprocess.run(
+              ["python", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py", "-v"],
+              capture_output=True, text=True,
+          ).stderr
+          print("skipped:", out.count("skipped"))
+          print("ran:", out.count(" ... ok"))
+          PY
+
+  install:
+    # The package once shipped without its own calibration profile and could
+    # not start when installed. Build it and run it from outside the checkout.
+    name: build and install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          pip install --quiet build
+          python -m build
+      - name: Install the wheel into a clean environment
+        run: pip install --quiet dist/*.whl
+      - name: Run it from somewhere that is not the checkout
+        working-directory: /tmp
+        run: |
+          aicut profile
+          aicut doctor
+          python -c "
+          from aicut.config import CalibrationProfile
+          from aicut.render.subtitles import SubtitleStyleProfile
+          profile = CalibrationProfile.load()
+          assert profile.provisional, 'the shipped profile must declare what is unmeasured'
+          assert SubtitleStyleProfile.load('default').resolved('default')['fontname']
+          print('installed package loads its own resources')
+          "

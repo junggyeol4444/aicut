@@ -24,12 +24,18 @@ log = logging.getLogger(__name__)
 def run(ctx: RunContext, transcriber: Transcriber | None = None, *, use_cache: bool = True) -> RunContext:
     # A caller that already probed the media (a resumed run, a test fixture, a
     # GPU box that did the measuring elsewhere) passes it in and skips decoding.
-    if ctx.media is None:
+    # The file checks go with it: they open the file, and a caller holding the
+    # media has already looked at it.
+    inspect_file = ctx.media is None
+    if inspect_file:
         ctx.media = probe(ctx.project.file_path)
-    warnings = list(ctx.media.validate())
-    truncated = verify_tail(ctx.project.file_path, ctx.media.duration_sec)
-    if truncated:
-        warnings.append(truncated)
+
+    warnings: list[str] = []
+    if inspect_file:
+        warnings.extend(ctx.media.validate())
+        truncated = verify_tail(ctx.project.file_path, ctx.media.duration_sec)
+        if truncated:
+            warnings.append(truncated)
     for warning in warnings:
         log.warning("%s", warning)
         ctx.report.setdefault("source_warnings", []).append(warning)

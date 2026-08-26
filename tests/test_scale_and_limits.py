@@ -8,7 +8,7 @@ built here at full size and pushed through the layers that hold it.
 from __future__ import annotations
 
 import json
-import resource
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -28,8 +28,19 @@ from aicut.pipeline.context import SignalBundle
 SIX_HOURS = 6 * 3600
 
 
-def _rss_mb() -> float:
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+def _rss_mb() -> float | None:
+    """Peak RSS in MB, or None where the platform will not say.
+
+    `resource` is POSIX-only; on Windows the memory assertion skips rather than
+    the whole module failing to import.
+    """
+    try:
+        import resource
+    except ImportError:
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Linux reports kilobytes, macOS reports bytes.
+    return peak / 1024 if sys.platform != "darwin" else peak / (1024 * 1024)
 
 
 def _six_hour_signals() -> tuple[list, list, list, list]:
@@ -102,7 +113,10 @@ class SixHourScaleTests(unittest.TestCase):
     def test_peak_memory_stays_modest(self):
         """A desktop tool that needs gigabytes to hold one broadcast's signals
         is not a desktop tool."""
-        self.assertLess(_rss_mb(), 1024, f"peak RSS reached {_rss_mb():.0f} MB")
+        peak = _rss_mb()
+        if peak is None:
+            self.skipTest("this platform does not report peak RSS")
+        self.assertLess(peak, 1024, f"peak RSS reached {peak:.0f} MB")
 
 
 class WorkspaceGuardTests(unittest.TestCase):

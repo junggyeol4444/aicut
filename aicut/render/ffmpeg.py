@@ -231,6 +231,18 @@ def build_concat_command(list_path: str, out_path: str) -> list[str]:
     ]
 
 
+def _escape_filter_path(path: str) -> str:
+    """Make a path safe inside an ffmpeg filter argument.
+
+    Filter syntax treats ':' as an option separator and quotes as delimiters,
+    so a Windows path like ``C:\\work\\subs.ass`` has to arrive as
+    ``C\\:/work/subs.ass`` - backslashes turned into forward slashes, the drive
+    colon escaped. On POSIX the same rules are harmless. An unescaped path does
+    not error; it produces a video with no captions, which is worse.
+    """
+    return str(path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
 def build_final_command(
     joined_path: str,
     out_path: str,
@@ -243,10 +255,9 @@ def build_final_command(
     """Burn subtitles and apply the measured loudness correction (10.4-3)."""
     video_filters: list[str] = []
     if ass_path:
-        escaped = str(ass_path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-        subtitle = f"subtitles='{escaped}'"
+        subtitle = f"subtitles='{_escape_filter_path(ass_path)}'"
         if fonts_dir:
-            subtitle += f":fontsdir='{fonts_dir}'"
+            subtitle += f":fontsdir='{_escape_filter_path(fonts_dir)}'"
         video_filters.append(subtitle)
 
     loudnorm = f"loudnorm=I={settings.loudness_i}:TP={settings.loudness_tp}:LRA={settings.loudness_lra}"

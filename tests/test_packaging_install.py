@@ -22,6 +22,14 @@ from aicut.resources import PROFILE_DIR, SUBTITLE_STYLE_DIR
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "aicut"
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
+# Windows puts the executables in Scripts\ and names them .exe.
+BIN_DIR = "Scripts" if sys.platform == "win32" else "bin"
+EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
+
+
+def _venv_exe(venv: Path, name: str) -> Path:
+    return venv / BIN_DIR / f"{name}{EXE_SUFFIX}"
+
 
 class ShippedResourceTests(unittest.TestCase):
     def test_the_default_profile_lives_inside_the_package(self):
@@ -75,13 +83,12 @@ class ShippedResourceTests(unittest.TestCase):
 class InstalledPackageTests(unittest.TestCase):
     """Build and install into a throwaway environment, then run it from elsewhere."""
 
-    @unittest.skipUnless(sys.platform.startswith("linux"), "venv install check is linux-only here")
     def test_a_fresh_install_can_load_its_own_resources(self):
         with tempfile.TemporaryDirectory() as tmp:
             venv = Path(tmp) / "venv"
             subprocess.run([sys.executable, "-m", "venv", venv], check=True,
                            capture_output=True, timeout=180)
-            pip = venv / "bin" / "pip"
+            pip = _venv_exe(venv, "pip")
             install = subprocess.run(
                 [str(pip), "install", "--quiet", "--no-deps", str(PROJECT_ROOT)],
                 capture_output=True, text=True, timeout=600,
@@ -91,7 +98,7 @@ class InstalledPackageTests(unittest.TestCase):
             # Run from a directory that is not the checkout, so a repo-relative
             # path cannot accidentally resolve.
             probe = subprocess.run(
-                [str(venv / "bin" / "python"), "-c",
+                [str(_venv_exe(venv, "python")), "-c",
                  "import json;from aicut.config import CalibrationProfile;"
                  "from aicut.render.subtitles import SubtitleStyleProfile;"
                  "p=CalibrationProfile.load();"
@@ -106,16 +113,15 @@ class InstalledPackageTests(unittest.TestCase):
             self.assertGreater(result["provisional"], 0)
             self.assertTrue(result["font"])
 
-    @unittest.skipUnless(sys.platform.startswith("linux"), "venv install check is linux-only here")
     def test_the_console_script_is_installed_and_works(self):
         with tempfile.TemporaryDirectory() as tmp:
             venv = Path(tmp) / "venv"
             subprocess.run([sys.executable, "-m", "venv", venv], check=True,
                            capture_output=True, timeout=180)
-            subprocess.run([str(venv / "bin" / "pip"), "install", "--quiet", "--no-deps",
+            subprocess.run([str(_venv_exe(venv, "pip")), "install", "--quiet", "--no-deps",
                             str(PROJECT_ROOT)], check=True, capture_output=True, timeout=600)
 
-            aicut = venv / "bin" / "aicut"
+            aicut = _venv_exe(venv, "aicut")
             self.assertTrue(aicut.exists(), "the aicut console script was not installed")
             result = subprocess.run([str(aicut), "profile"], cwd=tmp, capture_output=True,
                                     text=True, timeout=120)

@@ -33,6 +33,24 @@
 
 ---
 
+## 플랫폼
+
+**리눅스에서만 실제로 실행해봤다.** Windows·macOS는 CI 잡이 검증하며, 그 결과가
+나오기 전까지 "된다"고 말할 근거가 없다.
+
+Windows에서 구조적으로 다른 지점은 찾아서 고쳤다:
+
+| 지점 | 처리 |
+|---|---|
+| ffmpeg 필터 안의 `C:\경로` | `C\:/경로`로 이스케이프 (자막·폰트 경로 둘 다) |
+| 콘솔 코드페이지 | stdout/stderr를 UTF-8로 재구성. cp1252·cp437에서 한글 파일명 출력이 `UnicodeEncodeError`로 죽던 것 |
+| `resource` 모듈 부재 | 메모리 측정만 건너뛰고 나머지는 실행 |
+| `Scripts\` vs `bin/` | 설치 검증이 양쪽에서 돈다 |
+| concat 목록 경로 | 항상 슬래시 (`as_posix()`) |
+
+`tests/test_platform.py`가 이 가정들을 고정한다. 다만 그 파일이 증명하는 것은
+**코드가 그렇게 되어 있다**는 것이지, Windows에서 돌려봤다는 뜻이 아니다.
+
 ## 설치
 
 ```bash
@@ -269,7 +287,7 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 279 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 291 tests, 커버리지 90%
 ```
 
 ffmpeg가 없으면 미디어를 만지는 44개가 스스로 건너뛰고 나머지는 그대로 돈다.

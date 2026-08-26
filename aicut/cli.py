@@ -919,7 +919,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _force_utf8_console() -> None:
+    """Print Korean paths and titles without dying on the console codepage.
+
+    A Windows console defaults to the system codepage (cp949 for a Korean
+    install), and printing a path this tool routinely handles -
+    방송_2026-08-19.mkv - raises UnicodeEncodeError there. Reconfiguring the
+    streams costs nothing on POSIX, where they are already UTF-8.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):          # a redirected or closed stream
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_console()
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

@@ -47,6 +47,42 @@ jobs:
           assert ran >= 200, f"only {ran} tests ran offline"
           PY
 
+  platforms:
+    # Everything so far was verified on Linux. 22.1 calls for a desktop
+    # program, and most streamers who would use this are on Windows, where the
+    # differences are real: no `resource` module, Scripts\ instead of bin/,
+    # backslash paths inside ffmpeg filter strings, and a console codepage that
+    # cannot print a Korean filename. This job is the only thing that actually
+    # checks any of it.
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+      - name: Install OpenCV
+        run: pip install --quiet "opencv-python-headless<5"
+      - name: Run the whole suite
+        run: python -m unittest discover -s . -p "test_*.py"
+      - name: A Korean path must survive this platform's console
+        run: |
+          python -c "
+          from aicut.cli import _force_utf8_console
+          _force_utf8_console()
+          print('방송_2026-08-19 [하이라이트].mkv')
+          "
+
   full:
     # ffmpeg and OpenCV present: the live render, pipeline, face and path tests
     # stop skipping. These are the ones that caught the concat path bug, the

@@ -216,7 +216,9 @@ def load_credentials(client_secrets: str, token_path: str):  # pragma: no cover 
     token = Path(token_path)
     creds = None
     if token.exists():
-        creds = Credentials.from_authorized_user_info(json.loads(token.read_text()), SCOPES)
+        creds = Credentials.from_authorized_user_info(
+            json.loads(token.read_text(encoding="utf-8")), SCOPES
+        )
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())

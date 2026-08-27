@@ -209,6 +209,10 @@ def cmd_render(args) -> int:
     ctx = _context(args, project)
     rendering.render_episode(ctx, episode, plan_path=args.plan)
     print(f"rendered {episode.output_mp4_path}")
+    # 2.6: a departure from the plan is reported. Without this the operator gets
+    # a caption-less video and a line saying it rendered.
+    for entry in ctx.report.get("degraded", []):
+        print(f"  WARNING: {entry['detail']}")
     return 0
 
 

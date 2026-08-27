@@ -68,7 +68,8 @@ def render_episode(ctx: RunContext, episode: Episode, plan_path: str | Path | No
             f"installing a build with libass to get them. {LIBASS_HINT}"
         )
         log.warning("%s: %s", episode.episode_id, note)
-        episode.notes = f"{episode.notes}\n{note}".strip()
+        if "captions were NOT burned in" not in episode.notes:
+            episode.notes = f"{episode.notes}\n{note}".strip()
         ctx.report.setdefault("degraded", []).append(
             {"episode_id": episode.episode_id, "reason": "no_subtitles_filter",
              "detail": note, "subtitle_file": str(ass_path)}

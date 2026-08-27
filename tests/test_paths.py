@@ -166,6 +166,11 @@ class AwkwardPathTests(unittest.TestCase):
                         "the subtitle file must survive for a later re-render")
         self.assertIn("NOT burned in", episode.notes)
 
+        # Re-rendering must not stack the same note on the episode.
+        with mock.patch.object(rendering, "has_filter", return_value=False):
+            rendering.render_episode(ctx, episode)
+        self.assertEqual(episode.notes.count("NOT burned in"), 1)
+
     @unittest.skipUnless(has_filter("subtitles"), "this ffmpeg was built without libass")
     def test_subtitles_burn_in_despite_the_brackets_and_spaces(self):
         """The ASS path goes into an ffmpeg filter string, where ':' and quotes

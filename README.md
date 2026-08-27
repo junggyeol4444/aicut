@@ -35,16 +35,20 @@
 
 ## 플랫폼
 
-CI가 Windows·macOS에서 실제로 돌렸고, **양쪽 다 실패했다.** 나온 버그:
+CI가 Windows·macOS에서 실제로 돌린다. **처음 돌렸을 때 양쪽 다 실패했다.** 나온 버그:
 
 | 플랫폼 | 증상 | 원인 |
 |---|---|---|
 | macOS | 자막이 있는 렌더가 전부 실패 | `subtitles='경로'`의 위치 인자를 ffmpeg 7.2가 거부 (`No option name near`). 6.x·7.1은 받아줬다 |
 | Windows | sendcmd 줌 렌더 실패 | 명령 파일 경로가 이스케이프 없이 필터로 들어가 `C:`의 콜론에서 끊김 |
 | Windows | 워크스페이스 삭제 불가 | UI가 요청 스레드마다 SQLite 연결을 만들고 **닫지 않았다**. 리눅스에선 그냥 누수, Windows에선 파일 잠금 |
+| macOS | 그 다음 실행에서 자막 렌더가 또 전부 실패 | Homebrew가 formula를 쪼갰다. 지금 `brew install ffmpeg`가 주는 빌드에는 **libass가 없다** — `subtitles` 필터 자체가 존재하지 않는다 |
 
-셋 다 고쳤다. 앞의 둘은 필터 인자 이스케이프, 마지막은 요청이 끝날 때 그 스레드의
-연결을 닫는 것.
+넷 다 고쳤다. 마지막 것은 코드 버그가 아니라 사용자 환경이라, 고치는 방식이
+다르다: 빌드에 뭐가 있는지 **묻고**(`ffmpeg -filters`), 자르기 전에 확인하고,
+없으면 에피소드를 버리는 대신 자막 없이 렌더하고 `.ass`를 옆에 남긴 뒤 그
+이탈을 report에 적는다 (2.6). `aicut doctor`가 필터 가용성을 미리 찍는다.
+`subtitles` 필터를 지운 가짜 ffmpeg로 스위트 전체를 돌려서 확인했다.
 
 Windows에서 구조적으로 다른 나머지 지점:
 
@@ -57,7 +61,8 @@ Windows에서 구조적으로 다른 나머지 지점:
 | concat 목록 경로 | 항상 슬래시 (`as_posix()`) |
 
 `tests/test_platform.py`가 이 가정들을 고정하고, CI의 `windows-latest`·`macos-latest`
-잡이 실제로 실행한다. 리눅스 테스트만으로는 위 세 개 중 **하나도** 잡히지 않았다.
+잡이 실제로 실행한다. 리눅스 테스트만으로는 위 네 개 중 **하나도** 잡히지 않았다.
+현재 6잡 전부 통과한다 (`docs/measurements.md`의 플랫폼 표).
 
 ## 설치
 
@@ -76,6 +81,11 @@ aicut transcribe stream.mkv --backend whisperx --device cuda --stt-model large-v
 
 STT는 GPU를 원하는 유일한 단계다. 분리해 뒀으니 장비 있는 기계에서 트랜스크립트만
 뽑아 옮겨도 된다. 17.2의 원본↔완성본 쌍 트랜스크립트도 이걸로 만든다.
+
+세 번째 백엔드로 PocketSphinx가 있다(`pip install pocketsphinx`). 정확도는
+나쁘지만 음향 모델을 패키지에 싣고 와서 네트워크도 GPU도 필요 없다 — **실제
+인식기 출력으로 파이프라인이 도는지 검증하는 용도**다 (`tests/test_stt_live.py`,
+24.9초 오디오를 5.3초에 인식, 침묵 3개가 발화 경계 3개로).
 
 `ffmpeg` / `ffprobe`는 PATH에 있어야 한다.
 화자 분리(pyannote)는 HuggingFace 게이트 모델 승인이 선행되어야 한다 (20.2).
@@ -286,16 +296,17 @@ aicut profile --list                                     # 무엇을 언제 측�
   웃음·비명·환호는 크고 단어가 없고, 흥분한 발화는 크고 단어가 많다는 구분이다.
   거칠다 — 길게 지르는 문장은 놓치고 큰 기침은 잡는다. 숨기지 않고 적어 둔다.
   진짜 분류기는 `VocalBurstDetector` 뒤에 그대로 갈아 끼운다.
-- **실측 대기** — MVP 8(쿼터 증량 승인)과 20.2의 GPU STT 시간은 실제 계정·하드웨어가
+- **실측 대기** — MVP 8(쿼터 증량 승인)과 20.2의 **GPU** STT 시간은 실제 계정·하드웨어가
   필요하다. 나머지 실측은 `docs/measurements.md`에 끝냈다: 처리 시간(R3),
-  10.4 줌 전략 비교, 입력 검증. 자기 장비 숫자는 `aicut benchmark <원본>`으로 잰다.
+  10.4 줌 전략 비교, 입력 검증, 6시간 규모 메모리, 실제 인식기 STT, ffmpeg 빌드
+  차이, 플랫폼별 실행 결과. 자기 장비 숫자는 `aicut benchmark <원본>`으로 잰다.
 
 ---
 
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 291 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 298 tests, 커버리지 90%
 ```
 
 ffmpeg가 없으면 미디어를 만지는 44개가 스스로 건너뛰고 나머지는 그대로 돈다.

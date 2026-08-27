@@ -537,7 +537,9 @@ def cmd_transcribe(args) -> int:
     from aicut.media.stt import write_transcript
 
     media = probe(args.source)
-    media.validate()
+    # STT only listens, so an extracted audio track or a WAV is a valid input
+    # here even though it would not be a valid broadcast source.
+    media.validate(require_video=False)
     transcriber = _transcriber(args)
     print(f"transcribing {args.source} ({media.duration_sec / 60:.1f} min) with {args.backend}")
 
@@ -560,8 +562,19 @@ def cmd_transcribe(args) -> int:
 
 
 def _transcriber(args):
-    from aicut.media.stt import FasterWhisperTranscriber, WhisperXTranscriber
+    from aicut.media.stt import (
+        FasterWhisperTranscriber,
+        PocketSphinxTranscriber,
+        WhisperXTranscriber,
+    )
 
+    if args.backend == "pocketsphinx":
+        # No GPU, no download - the model is in the package. Poor accuracy, and
+        # English only, but it runs on a machine that can host nothing else.
+        if args.language and args.language != "en":
+            print(f"pocketsphinx is English-only; ignoring --language {args.language}",
+                  file=sys.stderr)
+        return PocketSphinxTranscriber()
     if args.backend == "faster-whisper":
         return FasterWhisperTranscriber(
             model_size=args.stt_model, device=args.device,
@@ -808,7 +821,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stop-after", choices=[s.value for s in State], default=None)
     run.add_argument("--no-render", action="store_true", help="stop after the edit plan (MVP 5)")
     run.add_argument("--frames", action="store_true", help="sample frames for the visual half of each pass")
-    run.add_argument("--backend", choices=["faster-whisper", "whisperx"], default="whisperx")
+    run.add_argument("--backend", choices=["faster-whisper", "whisperx", "pocketsphinx"], default="whisperx")
     run.add_argument("--stt-model", default="large-v3")
     run.add_argument("--compute-type", default="int8")
     run.add_argument("--language", default=None)
@@ -898,7 +911,7 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe = sub.add_parser("transcribe", help="run STT and write a transcript (20.2)")
     transcribe.add_argument("source")
     transcribe.add_argument("-o", "--out")
-    transcribe.add_argument("--backend", choices=["faster-whisper", "whisperx"], default="faster-whisper",
+    transcribe.add_argument("--backend", choices=["faster-whisper", "whisperx", "pocketsphinx"], default="faster-whisper",
                             help="faster-whisper runs on a CPU; whisperx wants a GPU")
     transcribe.add_argument("--stt-model", default="base")
     transcribe.add_argument("--device", default="cpu")

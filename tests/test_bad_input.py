@@ -81,11 +81,17 @@ class BadInputTests(unittest.TestCase):
             media.validate()
         self.assertIn("no audio stream", str(raised.exception))
 
-    def test_an_audio_only_file_is_refused(self):
+    def test_an_audio_only_file_is_refused_as_a_broadcast_source(self):
         media = probe(str(self.audio_only))
         with self.assertRaises(UnusableSource) as raised:
             media.validate()
         self.assertIn("no video stream", str(raised.exception))
+
+    def test_an_audio_only_file_is_accepted_by_the_stages_that_only_listen(self):
+        """`aicut transcribe` on an extracted track or a WAV is legitimate, and
+        17.2's source/output pairs often are exactly that."""
+        media = probe(str(self.audio_only))
+        self.assertEqual(media.validate(require_video=False), [])
 
     def test_a_good_file_passes_both_checks(self):
         media = probe(str(self.good))

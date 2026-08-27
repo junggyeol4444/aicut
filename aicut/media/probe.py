@@ -57,17 +57,21 @@ class MediaInfo:
                 return track
         return None
 
-    def validate(self) -> list[str]:
+    def validate(self, *, require_video: bool = True) -> list[str]:
         """Refuse a file that cannot be processed, and warn about one that lies.
 
         Better here than three stages later: 5.2 assumes picture and sound, and a
         source missing either produces a confusing failure somewhere downstream
         instead of a clear one at the door.
+
+        ``require_video=False`` for the stages that only listen. STT is the one
+        that matters: a transcript can legitimately be made from an extracted
+        audio track or a WAV, and 17.2's source/output pairs often are.
         """
         problems = []
         if self.duration_sec <= 0:
             problems.append("the container reports no duration")
-        if not self.video_codec:
+        if require_video and not self.video_codec:
             problems.append("there is no video stream")
         if not self.audio_tracks:
             problems.append("there is no audio stream, and the passes of 5.2 read sound as well as picture")

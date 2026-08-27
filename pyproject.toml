@@ -13,6 +13,10 @@ dependencies = []
 # The core engine runs on the stdlib + ffmpeg CLI. Everything below is opt-in
 # per pipeline stage, so a machine that only renders does not need torch.
 stt = ["whisperx"]
+# A recogniser that needs neither GPU nor a model download: its acoustic
+# model ships in the wheel. Accuracy is poor - this exists so the pipeline
+# can be exercised against real recogniser output anywhere.
+stt-offline = ["pocketsphinx"]
 diarization = ["pyannote.audio"]
 vision = ["opencv-python", "numpy"]
 audio = ["librosa", "soundfile"]

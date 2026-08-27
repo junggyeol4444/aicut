@@ -72,6 +72,74 @@ OpenCV 5.0이 `CascadeClassifier`를 **제거**했다. `pip install opencv-pytho
 데스크톱 프로그램(22.1)으로 감당 가능한 규모다. 1차 통과의 추론 호출이 비용을
 지배하고 신호 보관은 문제가 아니다.
 
+## ffmpeg 빌드 차이 — libass 없는 ffmpeg
+
+macOS CI가 `brew install ffmpeg` 직후 자막 렌더에서 죽었다:
+
+    [AVFilterGraph] No such filter: 'subtitles'
+    Error opening output files: Filter not found
+
+Homebrew가 formula를 쪼갰다. 지금 `ffmpeg` 병에 딸려오는 의존성은 11개
+(dav1d·lame·libvpx·opus·x264·x265 등)이고 **libass가 없다.** libass가 없으면
+`subtitles`·`ass` 필터 자체가 존재하지 않는다. macOS에서 가장 흔한 설치
+방법이 곧 자막을 태울 수 없는 ffmpeg라는 뜻이다. CI 사정이 아니라 사용자
+환경이다.
+
+| 빌드 | 필터 수 | `subtitles` |
+|---|---|---|
+| Debian `ffmpeg` 7.1.1 | 434 | 있음 |
+| Homebrew `ffmpeg` 8.1.2 | — | **없음** |
+| Homebrew `ffmpeg-full` | — | 있음 |
+
+대응은 세 겹:
+
+1. `available_filters()`가 `ffmpeg -filters`를 읽어 빌드가 실제로 뭘 할 수
+   있는지 묻는다. 가정하지 않는다.
+2. `Renderer.render`가 **자르기 전에** 확인한다. 다 만들어 놓고 마지막
+   명령에서 죽으면 원인이 안 보인다.
+3. 파이프라인은 에피소드를 버리지 않는다. 자막 없이 렌더하고 `.ass`는 옆에
+   남기고, 이탈을 report와 에피소드 메모에 적는다 (2.6 — 조용한 이탈 금지).
+   libass 있는 빌드를 깔고 렌더만 다시 돌리면 자막이 붙는다 (16장).
+
+`aicut doctor`가 이제 필터 가용성을 같이 찍는다. 6시간 돌린 뒤에 알 일이 아니다.
+
+검증: `subtitles`·`ass` 필터를 제거한 가짜 ffmpeg를 PATH에 앞세워 전체 스위트를
+돌렸다 — 298개 통과, 자막 번인 검사 2개만 건너뜀.
+
+## STT — 실제 인식기
+
+이전까지 STT는 트랜스크립트 파일로만 검증했다. 즉 **인식기 출력이 실제로 이
+시스템이 쓸 수 있는 모양인지는 확인한 적이 없었다.** PocketSphinx는 음향
+모델을 패키지 안에 싣고 오므로 네트워크도 GPU도 없이 돌아간다. espeak-ng로
+말을 만들고 그걸 인식시켜 파이프라인 전체를 통과시켰다.
+
+문장 3개, 사이에 4초 침묵:
+
+| 항목 | 값 |
+|---|---|
+| 오디오 | 24.9s |
+| 인식 시간 | 5.3s (**4.7배속**, CPU) |
+| 단어 | 37개 발화 / 29개 인식 |
+| 발화 묶음 | **3개** (침묵 3개가 경계 3개로) |
+
+인식 정확도는 나쁘다("i am very nervous about this match"가 "i really good
+about it"으로 나온다). 그게 요점이 아니다. 요점은 단어 타임스탬프와 침묵
+경계가 세그먼트 층이 쓸 수 있는 형태로 나온다는 것이고, 그건 확인됐다.
+
+WhisperX large-v3의 6시간 처리 시간(20.2)은 여전히 GPU에서 재야 한다.
+
+## 플랫폼 — 실제 실행 결과
+
+CI 6잡 전부 통과 (커밋 `69da471`):
+
+| 잡 | 환경 | 결과 |
+|---|---|---|
+| offline 3.10 / 3.13 | ffmpeg를 PATH에서 치움 | 298개 중 44개 건너뜀, 나머지 통과 |
+| with ffmpeg and OpenCV | ubuntu, ffmpeg 7.1 | 297개 통과 |
+| windows-latest | choco ffmpeg | 297개 통과 |
+| macos-latest | brew ffmpeg-full | 297개 통과 |
+| build and install | wheel을 저장소 밖에서 실행 | 통과 |
+
 ## 배포 형태
 
 `python -m build` 산출물 둘 다 필요한 파일을 싣는다: sdist·wheel 모두

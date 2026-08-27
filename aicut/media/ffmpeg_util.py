@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -38,13 +39,13 @@ def available_filters() -> frozenset[str]:
         output = run(["ffmpeg", "-hide_banner", "-filters"], timeout=30)
     except (RenderError, OSError):
         return frozenset()
-    names = set()
-    for line in output.splitlines():
-        parts = line.split()
-        # " T.. name  in->out  description"
-        if len(parts) >= 3 and not line.startswith(" ---") and parts[0].isalpha() is False:
-            names.add(parts[1])
-    return frozenset(names)
+    return frozenset(m.group(1) for m in _FILTER_LINE.finditer(output))
+
+
+# " TSC name  A->A  description" - the flag column is timeline / slice-threading
+# / command support, each either its letter or a dot. Matching the arrow column
+# too is what separates a filter row from the legend above it.
+_FILTER_LINE = re.compile(r"^ [TSC.]{3} (\S+) +\S+->\S+ ", re.MULTILINE)
 
 
 def has_filter(name: str) -> bool:

@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from aicut.config import CalibrationProfile
-from aicut.media.ffmpeg_util import has_filter, have_ffmpeg
+from aicut.media.ffmpeg_util import available_filters, has_filter, have_ffmpeg
 from aicut.models import Cut, Episode, PacingMode, SubtitleLine
 from aicut.render.editplan import EditPlan
 from aicut.render.ffmpeg import Renderer
@@ -234,6 +234,42 @@ class LiveRenderTests(unittest.TestCase):
 
         with self.assertRaises(RenderError):
             self._render(Episode(project_id="p", timeline=[]), "empty")
+
+
+@unittest.skipUnless(have_ffmpeg(), "ffmpeg is not installed")
+class FilterDetectionTests(unittest.TestCase):
+    """What the build reports it can do has to match what it can do.
+
+    An under-reading parser is worse than none: `require_filter` refuses to
+    render on a build that was fine. A first attempt keyed on the flag column
+    not being alphabetic, and dropped every filter whose flags happen to be
+    `TSC` - overlay, blend, rotate, lut3d and 117 others.
+    """
+
+    def test_the_parse_finds_every_filter_ffmpeg_lists(self):
+        listed = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, check=True,
+        )
+        text = listed.stdout + listed.stderr
+        expected = {
+            line.split()[1]
+            for line in text.splitlines()
+            if len(line.split()) >= 3
+            and line.startswith(" ")
+            and set(line.split()[0]) <= set("TSC.")
+            and len(line.split()[0]) == 3
+            and "->" in line.split()[2]
+        }
+        self.assertGreater(len(expected), 100, "ffmpeg listed almost nothing; the fixture is wrong")
+        self.assertEqual(available_filters(), frozenset(expected))
+
+    def test_filters_with_every_flag_set_are_not_dropped(self):
+        """`overlay` and friends carry TSC, which is what the first parse ate."""
+        for name in ("crop", "scale", "overlay", "loudnorm", "aresample"):
+            self.assertTrue(has_filter(name), f"a stock build has {name}")
+
+    def test_an_absent_filter_reads_as_absent(self):
+        self.assertFalse(has_filter("no_such_filter_exists_here"))
 
 
 if __name__ == "__main__":

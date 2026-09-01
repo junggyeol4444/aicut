@@ -268,12 +268,18 @@ class FilterListParseTests(unittest.TestCase):
         " ..C amovie            |->N       Read audio from a movie source.\n"
     )
 
-    # ffmpeg 8: " %c%c %-17s %-10s %s" - two flag characters, not three.
+    # ffmpeg 8/9: " %c%c %-17s %-10s %s" - two flag characters in the rows.
+    # Copied from a real `ffmpeg 9.0.1 -filters`, legend included: note that the
+    # legend still writes three-character masks (`T..`) while the rows carry
+    # two, so anything keyed on the legend's width parses the table wrongly.
     EIGHT = (
         "Filters:\n"
-        "  T. = Timeline support\n"
-        "  .S = Slice threading\n"
+        "  T.. = Timeline support\n"
+        "  .S. = Slice threading\n"
+        "  A = Audio input/output\n"
         "  V = Video input/output\n"
+        "  N = Dynamic number and/or type of input/output\n"
+        "  | = Source or sink filter\n"
         "  ------\n"
         " TS adenorm           A->A       Remedy denormals.\n"
         " .. acrossfade        AA->A      Cross fade two input audio streams.\n"

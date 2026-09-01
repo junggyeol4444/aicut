@@ -93,9 +93,15 @@ jobs:
         # had them: the `-filters` table changed shape between ffmpeg 7 and 8.
         # Printing the first rows makes the next such change visible here
         # instead of as a mysterious refusal to render.
+        #
+        # Not `ffmpeg | head`: PowerShell fails the step when head closes the
+        # pipe ("Program 'ffmpeg.exe' failed to run: The pipe is being closed"),
+        # which is how this diagnostic broke the job it was added to diagnose.
+        shell: bash
         run: |
-          ffmpeg -version | head -1
-          ffmpeg -hide_banner -filters | head -12
+          ffmpeg -version | sed -n 1p
+          ffmpeg -hide_banner -filters > "$RUNNER_TEMP/filters.txt"
+          sed -n '1,14p' "$RUNNER_TEMP/filters.txt"
           python -m aicut.cli doctor
       - name: Run the whole suite
         run: python -m unittest discover -s . -p "test_*.py"
@@ -123,9 +129,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Say what this ffmpeg can actually do
+        shell: bash
         run: |
-          ffmpeg -version | head -1
-          ffmpeg -hide_banner -filters | head -12
+          ffmpeg -version | sed -n 1p
+          ffmpeg -hide_banner -filters > "$RUNNER_TEMP/filters.txt"
+          sed -n '1,14p' "$RUNNER_TEMP/filters.txt"
       - name: Install optional analysis dependencies
         run: pip install --quiet "opencv-python-headless<5"
       - name: Run the whole suite

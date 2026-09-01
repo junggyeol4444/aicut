@@ -155,7 +155,7 @@ class AwkwardPathTests(unittest.TestCase):
                 {"render.video.preset": "ultrafast", "render.video.crf": 35}, measured=[]),
             producer=get_producer("mock"), workspace=self.workspace,
         )
-        with mock.patch.object(rendering, "has_filter", return_value=False):
+        with mock.patch.object(rendering, "filter_missing", return_value=True):
             rendering.render_episode(ctx, episode)
 
         self.assertTrue(Path(episode.output_mp4_path).exists(), "the video was lost over captions")
@@ -167,7 +167,7 @@ class AwkwardPathTests(unittest.TestCase):
         self.assertIn("NOT burned in", episode.notes)
 
         # Re-rendering must not stack the same note on the episode.
-        with mock.patch.object(rendering, "has_filter", return_value=False):
+        with mock.patch.object(rendering, "filter_missing", return_value=True):
             rendering.render_episode(ctx, episode)
         self.assertEqual(episode.notes.count("NOT burned in"), 1)
 

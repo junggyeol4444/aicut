@@ -12,6 +12,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from aicut.config import CalibrationProfile
@@ -339,6 +340,36 @@ class FilterDetectionTests(unittest.TestCase):
 
     def test_an_absent_filter_reads_as_absent(self):
         self.assertFalse(has_filter("no_such_filter_exists_here"))
+
+    def test_an_unreadable_listing_does_not_become_a_refusal(self):
+        """The listing has been emptied twice by ffmpeg changing its table.
+
+        Both times the failure mode was the same shape: a parse that reads
+        nothing looks identical to a build that has nothing. Refusing on that
+        basis breaks a working install, so an unknown answer must let the
+        render proceed and leave the verdict to ffmpeg."""
+        from aicut.media import ffmpeg_util
+
+        with mock.patch.object(ffmpeg_util, "available_filters", return_value=frozenset()):
+            self.assertFalse(ffmpeg_util.filters_known())
+            self.assertFalse(ffmpeg_util.filter_missing("subtitles"),
+                             "an unreadable listing was treated as a missing filter")
+            ffmpeg_util.require_filter(
+                "subtitles", needed_for="a render that must not be blocked by a parse bug",
+                install_hint="",
+            )
+
+    def test_a_filter_known_to_be_absent_is_still_refused(self):
+        from aicut.media import ffmpeg_util
+        from aicut.errors import RenderError
+
+        with mock.patch.object(ffmpeg_util, "available_filters",
+                               return_value=frozenset({"crop", "scale"})):
+            self.assertTrue(ffmpeg_util.filter_missing("subtitles"))
+            with self.assertRaises(RenderError) as raised:
+                ffmpeg_util.require_filter(
+                    "subtitles", needed_for="captions", install_hint="install libass")
+            self.assertIn("install libass", str(raised.exception))
 
 
 if __name__ == "__main__":

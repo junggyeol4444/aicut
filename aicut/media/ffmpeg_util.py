@@ -59,7 +59,7 @@ def _parse_filter_list(output: str) -> set[str]:
     names = set()
     for line in output.splitlines():
         if not line[:1].isspace():
-            continue                      # headings and the legend start at column 0
+            continue                      # the "Filters:" heading starts at column 0
         parts = line.split()
         for index, token in enumerate(parts):
             if index and "->" in token:
@@ -77,6 +77,26 @@ def has_filter(name: str) -> bool:
     return name in available_filters()
 
 
+def filters_known() -> bool:
+    """Whether the listing could be read at all.
+
+    An empty set means the parse failed, not that ffmpeg can do nothing - and
+    those are opposite instructions. Twice now a layout change has emptied it.
+    """
+    return bool(available_filters())
+
+
+def filter_missing(name: str) -> bool:
+    """True only when this build is known to lack the filter.
+
+    Not knowing is not the same as knowing it is absent. Callers act on a
+    missing filter by refusing or degrading, and doing either because the
+    listing could not be parsed would break a build that was fine. When the
+    answer is unknown, say no and let ffmpeg give its own error.
+    """
+    return filters_known() and name not in available_filters()
+
+
 #: How to get a build with libass on each platform. Homebrew split its formula:
 #: plain `ffmpeg` no longer links libass, so the most common macOS install
 #: produces a working ffmpeg that cannot burn a single caption.
@@ -89,7 +109,12 @@ LIBASS_HINT = {
 
 def require_filter(name: str, *, needed_for: str, install_hint: str) -> None:
     """Fail before the work, with the fix, when a build lacks what we need."""
-    if has_filter(name):
+    if not filter_missing(name):
+        if not filters_known():
+            log.warning(
+                "could not read this ffmpeg's filter list, so '%s' was not checked; "
+                "continuing and letting ffmpeg answer for itself", name,
+            )
         return
     raise RenderError(
         f"this ffmpeg build has no '{name}' filter, which {needed_for} requires.\n{install_hint}"

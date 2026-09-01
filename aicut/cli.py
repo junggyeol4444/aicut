@@ -774,11 +774,18 @@ def cmd_doctor(args) -> int:
     # Homebrew bottle links no libass, so `subtitles` is absent and captions
     # cannot be burned. Better to learn that here than after a six-hour run.
     if have_ffmpeg():
-        from aicut.media.ffmpeg_util import LIBASS_HINT, has_filter
+        from aicut.media.ffmpeg_util import LIBASS_HINT, filters_known, has_filter
 
+        known = filters_known()
         for filt, purpose in (("subtitles", "burn-in captions (10.3)"),
                               ("crop", "reframing and zoom (10.4-1)"),
                               ("loudnorm", "two-pass loudness (10.4-3)")):
+            if not known:
+                # Reporting "missing" here would be a lie with consequences:
+                # the operator would go install an ffmpeg they already have.
+                print(f"  [??] ffmpeg filter '{filt}' - {purpose}"
+                      " (this ffmpeg's filter list could not be read)")
+                continue
             ok = has_filter(filt)
             print(f"  [{'ok' if ok else '--'}] ffmpeg filter '{filt}' - {purpose}")
             if not ok and filt == "subtitles":

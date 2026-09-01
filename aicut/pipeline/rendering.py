@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 from aicut.errors import RenderError
-from aicut.media.ffmpeg_util import LIBASS_HINT, has_filter
+from aicut.media.ffmpeg_util import LIBASS_HINT, filter_missing
 from aicut.models import Episode
 from aicut.pipeline.context import RunContext
 from aicut.render.editplan import EditPlan
@@ -56,7 +56,7 @@ def render_episode(ctx: RunContext, episode: Episode, plan_path: str | Path | No
             title=episode.title_candidates[0] if episode.title_candidates else episode.episode_id,
         )
 
-    if ass_path and not has_filter("subtitles"):
+    if ass_path and filter_missing("subtitles"):
         # A working ffmpeg that was built without libass - the plain Homebrew
         # bottle, most static builds. Losing the whole episode over captions
         # would be the wrong trade, so the video is rendered without them and

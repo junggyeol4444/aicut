@@ -293,6 +293,13 @@ def build_final_command(
 # ---------------------------------------------------------------------------
 # orchestration
 # ---------------------------------------------------------------------------
+def _directory_mb(path: Path) -> float:
+    try:
+        return sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file()) / 1e6
+    except OSError:
+        return 0.0
+
+
 class Renderer:
     """Executes an edit plan. Contains no decision of any kind."""
 
@@ -357,11 +364,23 @@ class Renderer:
 
         target = Path(out_path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        run(build_final_command(
-            str(joined), str(target), settings,
-            ass_path=str(ass_path) if ass_path else None,
-            loudness=loudness,
-        ))
+        try:
+            run(build_final_command(
+                str(joined), str(target), settings,
+                ass_path=str(ass_path) if ass_path else None,
+                loudness=loudness,
+            ))
+        except RenderError:
+            # The cut segments stay, because they are what a person needs to see
+            # to work out why this failed - but silently leaving hundreds of
+            # megabytes behind is how a desktop program (22.1) fills a disk
+            # without anyone knowing which directory did it.
+            log.warning(
+                "render failed; leaving %s in place for inspection (%.0f MB) - "
+                "delete it once the cause is found",
+                stage, _directory_mb(stage),
+            )
+            raise
 
         if not keep_intermediate:
             shutil.rmtree(stage, ignore_errors=True)

@@ -149,6 +149,32 @@ class LiveRenderTests(unittest.TestCase):
         )
         self.assertLess(during, after - 5, "no overlay appeared where the subtitle should be")
 
+    def test_a_failed_render_leaves_its_segments_and_says_where(self):
+        """16장: a failed render must not cost the plan. It should not cost the
+        disk silently either - the segments stay for inspection, but the log
+        names the directory holding them."""
+        from aicut.errors import RenderError
+
+        episode = Episode(project_id="p", timeline=[Cut(0, 0.0, 4.0)])
+        plan = EditPlan.from_episode(episode, str(self.source))
+        work = self.dir / "failwork"
+        renderer = Renderer(_fast_profile(), work)
+
+        # An .ass path that is not a subtitle file: the segments cut fine and
+        # the final command is what fails, which is the case that leaks.
+        broken = self.dir / "not_subtitles.ass"
+        broken.write_text("this is not an ass file at all", encoding="utf-8")
+
+        with self.assertLogs("aicut.render.ffmpeg", level="WARNING") as logged:
+            with self.assertRaises(RenderError):
+                renderer.render(plan, self.dir / "never.mp4", ass_path=broken)
+
+        stage = work / plan.episode_id
+        self.assertTrue(stage.exists(), "the segments were deleted, so there is nothing to inspect")
+        self.assertTrue(any(stage.glob("seg_*.mp4")), "no segments survived the failure")
+        self.assertTrue(any(str(stage) in line for line in logged.output),
+                        "the log does not say where the leftover bytes are")
+
     def test_two_pass_loudness_hits_the_target(self):
         """10.4-3: measure then apply, so a stitched timeline holds one level."""
         episode = Episode(project_id="p", timeline=[Cut(0, 0.0, 4.0), Cut(1, 6.0, 10.0)])

@@ -74,9 +74,31 @@ class SceneIndex:
         events: Sequence[Event],
         details: Sequence[DetailSpan] = (),
         *,
-        max_gap_sec: float = 2.0,
+        profile: CalibrationProfile | None = None,
+        max_gap_sec: float | None = None,
+        max_scene_sec: float | None = None,
     ) -> "SceneIndex":
-        """Group speech into scenes, then tag each with the events it overlaps."""
+        """Group speech into scenes, then tag each with the events it overlaps.
+
+        Two judgements decide what a scene is, and neither may be a constant
+        (2장, 17.1): how long a pause ends one, and how long one may run.
+
+        The length cap is not decoration. Without it, speech that never pauses
+        for longer than the gap becomes a single scene - and a six-hour source
+        measured here produced exactly one, spanning the whole broadcast. Every
+        beat then retrieved the entire recording, so a plan came out with 179
+        cuts covering 44 days of source and 828,949 subtitle lines. Retrieval
+        cannot pick a moment out of a unit that is the whole thing.
+        """
+        if profile is not None:
+            if max_gap_sec is None:
+                max_gap_sec = profile.get_float("retrieval.scene_gap_sec")
+            if max_scene_sec is None:
+                max_scene_sec = profile.get_float("retrieval.scene_max_sec")
+        if max_gap_sec is None:
+            max_gap_sec = 2.0
+        if max_scene_sec is None:
+            max_scene_sec = 90.0
         scenes: list[Scene] = []
         current: list[Utterance] = []
 
@@ -98,6 +120,7 @@ class SceneIndex:
             if current and (
                 utterance.start_sec - current[-1].end_sec > max_gap_sec
                 or utterance.speaker != current[-1].speaker
+                or utterance.end_sec - current[0].start_sec > max_scene_sec
             ):
                 flush()
             current.append(utterance)

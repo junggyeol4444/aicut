@@ -49,7 +49,10 @@ def run(
     """Plan one episode per candidate group."""
     events = {e.event_id: e for e in ctx.store.events(ctx.project.project_id)}
     utterances = ctx.store.utterances(ctx.project.project_id)
-    index = SceneIndex.build(utterances, list(events.values()), ctx.store.details(ctx.project.project_id))
+    index = SceneIndex.build(
+        utterances, list(events.values()), ctx.store.details(ctx.project.project_id),
+        profile=ctx.profile,
+    )
 
     episodes: list[Episode] = []
     for group in groups:
@@ -115,6 +118,7 @@ def plan_episode(
     episode.subtitles = _subtitles(episode, timeline, utterances, ctx.signals.speaker_reliability)
     episode.planned_duration_sec = timeline.duration
     _note_length_deviation(ctx, episode, structure)
+    _note_implausible_plan(ctx, episode)
 
     ctx.store.save_episode(episode)
     _write_plan(ctx, episode)
@@ -288,6 +292,33 @@ def _clip_text(utterance: Utterance, start: float, end: float) -> str:
         if w.get("start") is not None and start - 0.05 <= float(w["start"]) <= end + 0.05
     ]
     return " ".join(w.strip() for w in words if w).strip() or ""
+
+
+def _note_implausible_plan(ctx: RunContext, episode: Episode) -> None:
+    """Catch a plan that cannot describe this source, whatever produced it.
+
+    An episode may legitimately be long, and 2.4 lets it revisit a moment more
+    than once, so cuts overlapping is not by itself wrong. Running longer than
+    the broadcast it was cut from is: measured on a six-hour source, a
+    retrieval fault yielded an episode of 3,830,063 seconds. Nothing noticed,
+    because the only length check compares against a hint the operator may
+    never have given. This one needs no hint.
+    """
+    source = ctx.project.duration_sec
+    if not source or not episode.planned_duration_sec:
+        return
+    if episode.planned_duration_sec <= source:
+        return
+    note = (
+        f"planned {episode.planned_duration_sec:.0f}s from a {source:.0f}s source - "
+        "an episode cannot outrun its own broadcast, so retrieval or the structure is wrong"
+    )
+    log.error("%s: %s", episode.episode_id, note)
+    episode.notes = f"{episode.notes}\n{note}".strip()
+    ctx.report.setdefault("implausible_plans", []).append(
+        {"episode_id": episode.episode_id, "planned_sec": episode.planned_duration_sec,
+         "source_sec": source, "cuts": len(episode.timeline), "detail": note}
+    )
 
 
 def _note_length_deviation(ctx: RunContext, episode: Episode, structure: dict) -> None:

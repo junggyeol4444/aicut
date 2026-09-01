@@ -111,3 +111,64 @@ class CombineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SceneLengthTests(unittest.TestCase):
+    """A scene is the unit retrieval picks from, so it cannot be the whole source.
+
+    Measured on a real six-hour run: a host talking with sub-second gaps
+    produced ONE scene spanning the entire broadcast, because scenes were only
+    ever split on a pause or a speaker change. Every beat then retrieved that
+    one scene, and the resulting plan had 179 cuts covering 3,830,063 seconds
+    of a 21,600 second source, with 828,949 subtitle lines.
+    """
+
+    SOURCE_SEC = 21600
+
+    def _continuous_talk(self, step=4.3, spoken=3.5):
+        """Six hours of speech whose gaps never reach the pause threshold."""
+        out, t = [], 5.0
+        while t < self.SOURCE_SEC - 200:
+            out.append(Utterance(
+                start_sec=t, end_sec=t + spoken, text="the tournament bracket again",
+                speaker="HOST",
+            ))
+            t += step
+        return out
+
+    def test_no_scene_swallows_the_broadcast(self):
+        profile = CalibrationProfile.load()
+        cap = profile.get_float("retrieval.scene_max_sec")
+        utterances = self._continuous_talk()
+        self.assertGreater(len(utterances), 4000, "the fixture must be six hours of talk")
+
+        index = SceneIndex.build(utterances, [], profile=profile)
+        longest = max(s.end_sec - s.start_sec for s in index.scenes)
+        self.assertLessEqual(
+            longest, cap + 10,
+            f"one scene ran {longest:.0f}s; retrieval cannot pick a moment out of the whole broadcast",
+        )
+        self.assertGreater(len(index.scenes), 100, "six hours collapsed into a handful of scenes")
+
+    def test_the_cap_is_a_profile_parameter_not_a_constant(self):
+        """17.1: every judgement threshold lives in the profile."""
+        utterances = self._continuous_talk()
+        short = CalibrationProfile.load().with_overrides(
+            {"retrieval.scene_max_sec": 20.0}, measured=[])
+        long = CalibrationProfile.load().with_overrides(
+            {"retrieval.scene_max_sec": 300.0}, measured=[])
+        self.assertGreater(
+            len(SceneIndex.build(utterances, [], profile=short).scenes),
+            len(SceneIndex.build(utterances, [], profile=long).scenes),
+            "the cap had no effect, so it is not the thing deciding scene length",
+        )
+
+    def test_a_real_pause_still_ends_a_scene_before_the_cap(self):
+        profile = CalibrationProfile.load()
+        gap = profile.get_float("retrieval.scene_gap_sec")
+        utterances = [
+            Utterance(start_sec=0.0, end_sec=3.0, text="before the pause", speaker="HOST"),
+            Utterance(start_sec=3.0 + gap + 1, end_sec=9.0 + gap, text="after the pause", speaker="HOST"),
+        ]
+        index = SceneIndex.build(utterances, [], profile=profile)
+        self.assertEqual(len(index.scenes), 2, "the pause no longer splits a scene")

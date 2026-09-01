@@ -233,3 +233,64 @@ class ReviewGateTests(PipelineHarness):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImplausiblePlanTests(unittest.TestCase):
+    """An episode cannot run longer than the broadcast it was cut from.
+
+    The length check that existed compared against the operator's hint, so a
+    run given no hint had nothing checking it at all - which is how a six-hour
+    source produced a 3,830,063 second episode and reached the render stage
+    without a word about it.
+    """
+
+    def test_a_plan_longer_than_its_source_is_reported(self):
+        from aicut.config import CalibrationProfile
+        from aicut.db.store import Store
+        from aicut.llm import get_producer
+        from aicut.models import Cut, Episode, Project
+        from aicut.pipeline import planning
+        from aicut.pipeline.context import RunContext
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = Store(Path(tmp) / "db.sqlite")
+            try:
+                project = store.create_project(Project(file_path="broadcast.mkv", duration_sec=3600.0))
+                ctx = RunContext(
+                    project=project, store=store, profile=CalibrationProfile.load(),
+                    producer=get_producer("mock"), workspace=Path(tmp) / "ws",
+                )
+                episode = Episode(project_id=project.project_id, timeline=[Cut(0, 0.0, 3000.0)])
+                episode.planned_duration_sec = 90000.0        # 25 hours from a 1 hour source
+
+                planning._note_implausible_plan(ctx, episode)
+
+                reported = ctx.report.get("implausible_plans", [])
+                self.assertEqual(len(reported), 1, "an impossible plan went unreported")
+                self.assertEqual(reported[0]["source_sec"], 3600.0)
+                self.assertIn("cannot outrun its own broadcast", episode.notes)
+            finally:
+                store.close()
+
+    def test_a_plan_that_fits_its_source_is_not_flagged(self):
+        from aicut.config import CalibrationProfile
+        from aicut.db.store import Store
+        from aicut.llm import get_producer
+        from aicut.models import Cut, Episode, Project
+        from aicut.pipeline import planning
+        from aicut.pipeline.context import RunContext
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = Store(Path(tmp) / "db.sqlite")
+            try:
+                project = store.create_project(Project(file_path="b.mkv", duration_sec=3600.0))
+                ctx = RunContext(
+                    project=project, store=store, profile=CalibrationProfile.load(),
+                    producer=get_producer("mock"), workspace=Path(tmp) / "ws",
+                )
+                episode = Episode(project_id=project.project_id, timeline=[Cut(0, 0.0, 600.0)])
+                episode.planned_duration_sec = 600.0
+                planning._note_implausible_plan(ctx, episode)
+                self.assertNotIn("implausible_plans", ctx.report)
+            finally:
+                store.close()

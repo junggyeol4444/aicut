@@ -169,11 +169,17 @@ class LiveRenderTests(unittest.TestCase):
             with self.assertRaises(RenderError):
                 renderer.render(plan, self.dir / "never.mp4", ass_path=broken)
 
-        stage = work / plan.episode_id
+        # The renderer resolves its staging path, and on Windows that expands
+        # the short form (RUNNER~1), so an unresolved path here would not match
+        # the one in the log.
+        stage = (work / plan.episode_id).resolve()
         self.assertTrue(stage.exists(), "the segments were deleted, so there is nothing to inspect")
         self.assertTrue(any(stage.glob("seg_*.mp4")), "no segments survived the failure")
-        self.assertTrue(any(str(stage) in line for line in logged.output),
-                        "the log does not say where the leftover bytes are")
+        # Case-insensitive: Windows paths differ only in drive-letter case
+        # between one resolve and the next, which is not what this is testing.
+        wanted = str(stage).lower()
+        self.assertTrue(any(wanted in line.lower() for line in logged.output),
+                        f"the log does not say where the leftover bytes are: {logged.output}")
 
     def test_two_pass_loudness_hits_the_target(self):
         """10.4-3: measure then apply, so a stitched timeline holds one level."""

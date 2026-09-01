@@ -93,7 +93,10 @@ class CliLiveTests(unittest.TestCase):
 
         code, rendered = run(*self._base(), "render", str(plan_path))
         self.assertEqual(code, 0, rendered)
-        output = Path(rendered.split("rendered ")[-1].strip())
+        # The command may print warnings after the path (a build that cannot
+        # burn captions, say), so take the line, not the tail of the output.
+        line = next(l for l in rendered.splitlines() if l.startswith("rendered "))
+        output = Path(line[len("rendered "):].strip())
         self.assertTrue(output.exists())
         self.assertGreater(output.stat().st_size, 0)
 

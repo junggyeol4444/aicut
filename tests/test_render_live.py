@@ -15,7 +15,12 @@ import unittest
 from pathlib import Path
 
 from aicut.config import CalibrationProfile
-from aicut.media.ffmpeg_util import available_filters, has_filter, have_ffmpeg
+from aicut.media.ffmpeg_util import (
+    _parse_filter_list,
+    available_filters,
+    has_filter,
+    have_ffmpeg,
+)
 from aicut.models import Cut, Episode, PacingMode, SubtitleLine
 from aicut.render.editplan import EditPlan
 from aicut.render.ffmpeg import Renderer
@@ -236,37 +241,95 @@ class LiveRenderTests(unittest.TestCase):
             self._render(Episode(project_id="p", timeline=[]), "empty")
 
 
-@unittest.skipUnless(have_ffmpeg(), "ffmpeg is not installed")
-class FilterDetectionTests(unittest.TestCase):
-    """What the build reports it can do has to match what it can do.
+class FilterListParseTests(unittest.TestCase):
+    """The layout of `ffmpeg -filters` is not stable, and getting it wrong is
+    not a near miss: an empty set makes `require_filter` read every build as
+    incapable and refuse to render.
 
-    An under-reading parser is worse than none: `require_filter` refuses to
-    render on a build that was fine. A first attempt keyed on the flag column
-    not being alphabetic, and dropped every filter whose flags happen to be
-    `TSC` - overlay, blend, rotate, lut3d and 117 others.
+    ffmpeg 7 prints three flag characters (`T`/`S`/`C`), ffmpeg 8 prints two -
+    the command-support flag was dropped, and a parser pinned to three matched
+    nothing at all. Both layouts are pinned here, from ffmpeg's own format
+    strings, so the next change to the table is a failing test rather than a
+    build that claims it cannot crop.
     """
 
-    def test_the_parse_finds_every_filter_ffmpeg_lists(self):
-        listed = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, check=True,
-        )
-        text = listed.stdout + listed.stderr
-        expected = {
-            line.split()[1]
-            for line in text.splitlines()
-            if len(line.split()) >= 3
-            and line.startswith(" ")
-            and set(line.split()[0]) <= set("TSC.")
-            and len(line.split()[0]) == 3
-            and "->" in line.split()[2]
-        }
-        self.assertGreater(len(expected), 100, "ffmpeg listed almost nothing; the fixture is wrong")
-        self.assertEqual(available_filters(), frozenset(expected))
+    SEVEN = (
+        "Filters:\n"
+        "  T.. = Timeline support\n"
+        "  .S. = Slice threading\n"
+        "  ..C = Command support\n"
+        "  A = Audio input/output\n"
+        "  | = Source or sink filter\n"
+        "  ------\n"
+        " TSC adenorm           A->A       Remedy denormals.\n"
+        " ... acrossfade        AA->A      Cross fade two input audio streams.\n"
+        " T.C crop              V->V       Crop the input video.\n"
+        " ... subtitles         V->V       Render text subtitles.\n"
+        " ..C amovie            |->N       Read audio from a movie source.\n"
+    )
 
-    def test_filters_with_every_flag_set_are_not_dropped(self):
-        """`overlay` and friends carry TSC, which is what the first parse ate."""
-        for name in ("crop", "scale", "overlay", "loudnorm", "aresample"):
-            self.assertTrue(has_filter(name), f"a stock build has {name}")
+    # ffmpeg 8: " %c%c %-17s %-10s %s" - two flag characters, not three.
+    EIGHT = (
+        "Filters:\n"
+        "  T. = Timeline support\n"
+        "  .S = Slice threading\n"
+        "  V = Video input/output\n"
+        "  ------\n"
+        " TS adenorm           A->A       Remedy denormals.\n"
+        " .. acrossfade        AA->A      Cross fade two input audio streams.\n"
+        " T. crop              V->V       Crop the input video.\n"
+        " .. subtitles         V->V       Render text subtitles.\n"
+        " .. amovie            |->N       Read audio from a movie source.\n"
+    )
+
+    EXPECTED = {"adenorm", "acrossfade", "crop", "subtitles", "amovie"}
+
+    def test_the_ffmpeg_7_layout_parses(self):
+        self.assertEqual(_parse_filter_list(self.SEVEN), self.EXPECTED)
+
+    def test_the_ffmpeg_8_layout_parses(self):
+        """Two flag characters instead of three; this is what returned nothing."""
+        self.assertEqual(_parse_filter_list(self.EIGHT), self.EXPECTED)
+
+    def test_the_legend_is_not_mistaken_for_filters(self):
+        for parsed in (_parse_filter_list(self.SEVEN), _parse_filter_list(self.EIGHT)):
+            self.assertNotIn("=", parsed)
+            self.assertNotIn("Timeline", parsed)
+
+    def test_nothing_is_invented_from_an_empty_listing(self):
+        self.assertEqual(_parse_filter_list("Filters:\n  ------\n"), set())
+
+
+@unittest.skipUnless(have_ffmpeg(), "ffmpeg is not installed")
+class FilterDetectionTests(unittest.TestCase):
+    """And against the ffmpeg that is actually installed, whichever that is."""
+
+    #: In every build since ffmpeg 2. If one of these is missing, the parse is
+    #: broken, not the build.
+    UNIVERSAL = ("crop", "scale", "overlay", "format", "null", "anull",
+                 "volume", "aresample", "concat", "trim", "atrim", "fps")
+
+    def test_the_filters_every_build_has_are_found(self):
+        missing = [f for f in self.UNIVERSAL if not has_filter(f)]
+        self.assertEqual(missing, [], f"the parse lost filters this build has: {missing}")
+
+    def test_the_listing_is_not_almost_empty(self):
+        self.assertGreater(len(available_filters()), 100,
+                           "a near-empty set makes require_filter refuse every render")
+
+    def test_nothing_detected_is_invented(self):
+        """Cross-checked against a different ffmpeg command, so a parser that
+        picks up description words fails here rather than looking plausible."""
+        import random
+
+        sample = random.Random(0).sample(sorted(available_filters()), 15)
+        for name in sample:
+            with self.subTest(filter=name):
+                probe = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-h", f"filter={name}"],
+                    capture_output=True, text=True,
+                )
+                self.assertNotIn("Unknown filter", probe.stdout + probe.stderr)
 
     def test_an_absent_filter_reads_as_absent(self):
         self.assertFalse(has_filter("no_such_filter_exists_here"))

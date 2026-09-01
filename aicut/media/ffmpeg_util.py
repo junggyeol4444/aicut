@@ -39,13 +39,38 @@ def available_filters() -> frozenset[str]:
         output = run(["ffmpeg", "-hide_banner", "-filters"], timeout=30)
     except (RenderError, OSError):
         return frozenset()
-    return frozenset(m.group(1) for m in _FILTER_LINE.finditer(output))
+    return frozenset(_parse_filter_list(output))
 
 
-# " TSC name  A->A  description" - the flag column is timeline / slice-threading
-# / command support, each either its letter or a dot. Matching the arrow column
-# too is what separates a filter row from the legend above it.
-_FILTER_LINE = re.compile(r"^ [TSC.]{3} (\S+) +\S+->\S+ ", re.MULTILINE)
+def _parse_filter_list(output: str) -> set[str]:
+    """Pull filter names out of `ffmpeg -filters`, whatever the layout is.
+
+    Two earlier attempts pinned the layout and both were wrong. Selecting rows
+    by "the flag column is not alphabetic" dropped the 121 filters whose flags
+    read `TSC`. Pinning `^ [TSC.]{3} name in->out` then matched nothing at all
+    on ffmpeg 8, which lays the table out differently - and an empty set is the
+    worst outcome, because `require_filter` reads it as "this build can do
+    nothing" and refuses to render.
+
+    So key on the one thing every version prints: a column giving the stream
+    signature, `V->V` or `A->A` or `N->N`. The name is the token before it. No
+    assumption about indentation, flag letters, or column widths.
+    """
+    names = set()
+    for line in output.splitlines():
+        if not line[:1].isspace():
+            continue                      # headings and the legend start at column 0
+        parts = line.split()
+        for index, token in enumerate(parts):
+            if index and "->" in token:
+                name = parts[index - 1]
+                if _FILTER_NAME.fullmatch(name):
+                    names.add(name)
+                break
+    return names
+
+
+_FILTER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 
 
 def has_filter(name: str) -> bool:

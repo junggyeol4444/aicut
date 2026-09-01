@@ -89,7 +89,14 @@ jobs:
       - name: Install OpenCV
         run: pip install --quiet "opencv-python-headless<5"
       - name: Say what this ffmpeg can actually do
-        run: python -m aicut.cli doctor
+        # Both platform jobs once reported every filter missing, on builds that
+        # had them: the `-filters` table changed shape between ffmpeg 7 and 8.
+        # Printing the first rows makes the next such change visible here
+        # instead of as a mysterious refusal to render.
+        run: |
+          ffmpeg -version | head -1
+          ffmpeg -hide_banner -filters | head -12
+          python -m aicut.cli doctor
       - name: Run the whole suite
         run: python -m unittest discover -s . -p "test_*.py"
       - name: A Korean path must survive this platform's console
@@ -115,6 +122,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Say what this ffmpeg can actually do
+        run: |
+          ffmpeg -version | head -1
+          ffmpeg -hide_banner -filters | head -12
       - name: Install optional analysis dependencies
         run: pip install --quiet "opencv-python-headless<5"
       - name: Run the whole suite

@@ -312,16 +312,16 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 301 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 314 tests, 커버리지 90%
 ```
 
-ffmpeg가 없으면 미디어를 만지는 47개가 스스로 건너뛰고 나머지는 그대로 돈다.
+ffmpeg가 없으면 미디어를 만지는 51개가 스스로 건너뛰고 나머지는 그대로 돈다.
 CI가 ffmpeg를 **숨긴 채** 한 번 더 돌려서 그 주장을 검증한다 — GitHub 러너에는
 ffmpeg가 기본으로 깔려 있어서, 숨기지 않으면 이 잡은 아무것도 증명하지 못한다. 합성 방송 픽스처(`tests/fixtures.py`)로 파이프라인
 전체를 오프라인 실행한다: 한 시간 떨어진 두 시점을 잇는 사건, 잘라야 할
 자리비움, 지켜야 할 정적이 들어 있다.
 
-나머지 18개(`test_render_live.py`, `test_pipeline_live.py`)는 **실제로 ffmpeg를
+나머지 29개(`test_render_live.py`, `test_pipeline_live.py`)는 **실제로 ffmpeg를
 돌린다.** ffmpeg가 없으면 건너뛴다. 다른 테스트는 렌더러가 *만드는 명령*을
 검사하지만, 이쪽은 그 명령이 실제 파일에 무슨 짓을 하는지 검사한다:
 

@@ -191,7 +191,7 @@ Homebrew가 formula를 쪼갰다. 지금 `ffmpeg` 병에 딸려오는 의존성�
 `aicut doctor`가 이제 필터 가용성을 같이 찍는다. 6시간 돌린 뒤에 알 일이 아니다.
 
 검증: `subtitles`·`ass` 필터를 제거한 가짜 ffmpeg를 PATH에 앞세워 전체 스위트를
-돌렸다 — 301개 통과, 자막 번인 검사 2개만 건너뜀.
+돌렸다 — 314개 통과, 자막 번인 검사 2개만 건너뜀.
 
 ## STT — 실제 인식기
 
@@ -217,14 +217,14 @@ WhisperX large-v3의 6시간 처리 시간(20.2)은 여전히 GPU에서 재야 �
 
 ## 플랫폼 — 실제 실행 결과
 
-CI 6잡 전부 통과 (커밋 `69da471`):
+CI 6잡 전부 통과 (커밋 `7eb2ae2`):
 
 | 잡 | 환경 | 결과 |
 |---|---|---|
-| offline 3.10 / 3.13 | ffmpeg를 PATH에서 치움 | 298개 중 44개 건너뜀, 나머지 통과 |
-| with ffmpeg and OpenCV | ubuntu, ffmpeg 7.1 | 297개 통과 |
-| windows-latest | choco ffmpeg | 297개 통과 |
-| macos-latest | brew ffmpeg-full | 297개 통과 |
+| offline 3.10 / 3.13 | ffmpeg를 PATH에서 치움 | 314개 중 51개 건너뜀, 나머지 통과 |
+| with ffmpeg and OpenCV | ubuntu, ffmpeg 7.1 | 314개 통과 |
+| windows-latest | choco ffmpeg 9.0.1 | 314개 통과 |
+| macos-latest | brew ffmpeg-full 8.x | 314개 통과 |
 | build and install | wheel을 저장소 밖에서 실행 | 통과 |
 
 ## 배포 형태

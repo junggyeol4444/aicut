@@ -167,6 +167,18 @@ class CalibrationProfile:
         return any(".".join(parts[: i + 1]) in self.provisional for i in range(len(parts)))
 
     # ---- reporting ---------------------------------------------------------
+    def measured_parameters(self) -> list[str]:
+        """What has actually been measured, in the order a person would read it.
+
+        `provisional` holds whole groups, `measured` holds individual leaves, so
+        a set difference between them tells you nothing: measuring
+        `silence.level_db` leaves the `silence` group listed as a guess, which
+        is correct - two of its three values still are - but reporting only the
+        group count then shows nothing changed. Running step 1 of 17.4 looked
+        like it had done nothing at all.
+        """
+        return sorted(self.measured)
+
     def touched_provisional(self) -> list[str]:
         """Parameters actually read during this run that are still guesses."""
         return sorted(self._touched_provisional)

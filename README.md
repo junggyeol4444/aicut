@@ -312,7 +312,7 @@ aicut profile --list                                     # 무엇을 언제 측�
 ## 개발
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"    # 326 tests, 커버리지 90%
+python -m unittest discover -s . -p "test_*.py"    # 330 tests, 커버리지 90%
 ```
 
 ffmpeg가 없으면 미디어를 만지는 51개가 스스로 건너뛰고 나머지는 그대로 돈다.

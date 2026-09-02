@@ -824,11 +824,18 @@ def cmd_doctor(args) -> int:
                 print(f"       {LIBASS_HINT}")
 
     profile = _profile(args)
+    measured = profile.measured_parameters()
+    if measured:
+        print(f"\n  measured in profile '{profile.name}': {', '.join(measured)}")
     if profile.provisional:
         print(
             f"\n  {len(profile.provisional)} parameter groups are still unmeasured guesses in"
             f" profile '{profile.name}' (17.5). Run `aicut calibrate` before relying on output."
         )
+        if measured:
+            # Without this the count never moves and step 1 of 17.4 looks inert:
+            # a group stays listed while one value inside it has been measured.
+            print("  (a group stays listed while any value inside it is still a guess)")
     return 0
 
 

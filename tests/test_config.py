@@ -42,3 +42,45 @@ class ProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MeasurementVisibilityTests(unittest.TestCase):
+    """Measuring something must be visible, or the step looks inert.
+
+    `provisional` holds groups and `measured` holds leaves, so measuring
+    `silence.level_db` correctly leaves the `silence` group flagged - two of its
+    three values are still guesses. But every surface reported only the group
+    count, so running step 1 of 17.4 changed nothing on screen and looked like
+    it had failed.
+    """
+
+    def _measured(self):
+        return CalibrationProfile.load().with_overrides(
+            {"silence.level_db": -34.2}, measured=["silence.level_db"]
+        )
+
+    def test_a_measured_leaf_stops_being_provisional(self):
+        profile = self._measured()
+        self.assertFalse(profile.is_provisional("silence.level_db"))
+        self.assertTrue(profile.is_provisional("silence.merge_gap_sec"),
+                        "the rest of the group is still a guess and must stay flagged")
+
+    def test_the_measurement_is_reported(self):
+        self.assertEqual(self._measured().measured_parameters(), ["silence.level_db"])
+        self.assertEqual(CalibrationProfile.load().measured_parameters(), [])
+
+    def test_a_run_stops_naming_it_among_the_guesses_it_relied_on(self):
+        """17.5: the report lists the unmeasured values a run actually read."""
+        profile = self._measured()
+        profile.get_float("silence.level_db")
+        profile.get_float("silence.merge_gap_sec")
+        self.assertEqual(profile.touched_provisional(), ["silence.merge_gap_sec"])
+
+    def test_the_measurement_survives_a_save_and_reload(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "measured.json"
+            self._measured().save(path)
+            reloaded = CalibrationProfile.load(path)
+            self.assertEqual(reloaded.measured_parameters(), ["silence.level_db"])
+            self.assertFalse(reloaded.is_provisional("silence.level_db"))
+            self.assertTrue(reloaded.is_provisional("silence.merge_gap_sec"))

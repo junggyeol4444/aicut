@@ -100,7 +100,20 @@ class WhisperXTranscriber(Transcriber):
         self.diarize = diarize
 
     def transcribe(self, path: str, media: MediaInfo) -> list[Utterance]:  # pragma: no cover - needs GPU stack
-        import whisperx
+        try:
+            import whisperx
+        except ImportError as exc:
+            # This is the default backend, so this is the most likely first run
+            # anyone has. The other two guard their imports; this one did not,
+            # and a bare ModuleNotFoundError traceback is not an answer.
+            raise AicutError(
+                "whisperx is not installed, and it is the default STT backend.\n"
+                "  pip install 'aicut[stt]'            - install it (wants a GPU)\n"
+                "  --backend faster-whisper            - runs on a CPU\n"
+                "  --backend pocketsphinx              - no download, no GPU, poor accuracy\n"
+                "  --transcript <file>                 - use a transcript made elsewhere\n"
+                "  --no-stt                            - skip STT entirely"
+            ) from exc
 
         audio = whisperx.load_audio(path)
         model = whisperx.load_model(self.model_size, self.device, compute_type=self.compute_type, language=self.language)

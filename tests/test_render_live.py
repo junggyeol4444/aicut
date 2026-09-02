@@ -152,31 +152,37 @@ class LiveRenderTests(unittest.TestCase):
     def test_a_failed_render_leaves_its_segments_and_says_where(self):
         """16장: a failed render must not cost the plan. It should not cost the
         disk silently either - the segments stay for inspection, but the log
-        names the directory holding them."""
+        names the directory holding them.
+
+        The failure is forced at the final command specifically, because that is
+        the case that leaks: the segments are already cut by then. Forcing it
+        with a bad subtitle file would not do - a build without libass refuses
+        before cutting anything, and the test would be proving nothing there.
+        """
         from aicut.errors import RenderError
+        from aicut.render import ffmpeg as ffmpeg_mod
 
         episode = Episode(project_id="p", timeline=[Cut(0, 0.0, 4.0)])
         plan = EditPlan.from_episode(episode, str(self.source))
         work = self.dir / "failwork"
         renderer = Renderer(_fast_profile(), work)
 
-        # An .ass path that is not a subtitle file: the segments cut fine and
-        # the final command is what fails, which is the case that leaks.
-        broken = self.dir / "not_subtitles.ass"
-        broken.write_text("this is not an ass file at all", encoding="utf-8")
+        real_build = ffmpeg_mod.build_final_command
 
-        with self.assertLogs("aicut.render.ffmpeg", level="WARNING") as logged:
-            with self.assertRaises(RenderError):
-                renderer.render(plan, self.dir / "never.mp4", ass_path=broken)
+        def doomed(*args, **kwargs):
+            cmd = list(real_build(*args, **kwargs))
+            return cmd[:1] + ["-loglevel", "error", "-f", "no_such_format_exists"] + cmd[1:]
+
+        with mock.patch.object(ffmpeg_mod, "build_final_command", doomed):
+            with self.assertLogs("aicut.render.ffmpeg", level="WARNING") as logged:
+                with self.assertRaises(RenderError):
+                    renderer.render(plan, self.dir / "never.mp4")
 
         # The renderer resolves its staging path, and on Windows that expands
-        # the short form (RUNNER~1), so an unresolved path here would not match
-        # the one in the log.
+        # the short form (RUNNER~1), so an unresolved path would not match.
         stage = (work / plan.episode_id).resolve()
         self.assertTrue(stage.exists(), "the segments were deleted, so there is nothing to inspect")
         self.assertTrue(any(stage.glob("seg_*.mp4")), "no segments survived the failure")
-        # Case-insensitive: Windows paths differ only in drive-letter case
-        # between one resolve and the next, which is not what this is testing.
         wanted = str(stage).lower()
         self.assertTrue(any(wanted in line.lower() for line in logged.output),
                         f"the log does not say where the leftover bytes are: {logged.output}")

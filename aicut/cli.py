@@ -77,6 +77,32 @@ def _print(data) -> None:
 
 
 # ---------------------------------------------------------------------------
+def _print_report_warnings(report: dict) -> None:
+    """Say out loud what the run decided to tell you.
+
+    Every one of these already went into report.json, and pointing at a file
+    is not reporting: 2.6 requires a departure from the plan to be reported,
+    16장 requires a failed render to be visible without costing the plan, and a
+    source that lies about its length is worth knowing before the operator
+    wonders why the last cut is empty. A person who runs one command should
+    not have to open a JSON file to learn any of it.
+    """
+    for warning in report.get("source_warnings", []):
+        print(f"\n  SOURCE: {warning}")
+    for entry in report.get("implausible_plans", []):
+        print(f"\n  IMPLAUSIBLE PLAN: {entry['detail']}")
+    for entry in report.get("length_deviations", []):
+        print(
+            f"\n  LENGTH (2.6): {entry['episode_id']} planned {entry['planned_sec']}s"
+            f" against a {entry['hint_sec']}s hint - {entry['reason']}"
+        )
+    for entry in report.get("degraded", []):
+        print(f"\n  DEGRADED: {entry['detail']}")
+    for entry in report.get("render_failures", []):
+        print(f"\n  RENDER FAILED for {entry['episode_id']}: {entry['error']}")
+        print(f"      {entry['note']}")
+
+
 def cmd_run(args) -> int:
     pipeline = _pipeline(args)
     project = pipeline.submit(
@@ -107,6 +133,7 @@ def cmd_run(args) -> int:
             print(f"      title candidates: {' | '.join(episode['titles'])}")
         if episode["output"]:
             print(f"      output: {episode['output']}")
+    _print_report_warnings(result.report)
     if result.report.get("provisional_parameters_used"):
         print(f"\n  {result.report['warning']}")
         print(f"  provisional: {', '.join(result.report['provisional_parameters_used'])}")
@@ -138,6 +165,7 @@ def cmd_resume(args) -> int:
     print(f"\n{args.project} -> {result.final_state.value}")
     for episode in result.report.get("episodes", []):
         print(f"  [{episode['target_type'] or '?'}] {episode['duration_sec']}s, {episode['cuts']} cuts")
+    _print_report_warnings(result.report)
     return 0 if result.final_state is not State.FAILED else 1
 
 

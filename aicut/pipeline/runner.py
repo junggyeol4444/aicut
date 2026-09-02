@@ -21,7 +21,7 @@ from typing import Any
 
 from aicut.config import CalibrationProfile
 from aicut.db.store import Store
-from aicut.errors import PipelineError
+from aicut.errors import AicutError, PipelineError
 from aicut.llm import Producer, get_producer
 from aicut.media.stt import Transcriber
 from aicut.models import Episode, Project
@@ -167,7 +167,14 @@ class Pipeline:
             return result
 
         except Exception as exc:
-            log.exception("project %s failed", project.project_id)
+            # An AicutError is a condition this program recognised and wrote a
+            # sentence about - a missing backend, an unusable source. Printing a
+            # stack trace above that sentence buries the instruction in noise.
+            # Anything else is a surprise, and the traceback is the point.
+            if isinstance(exc, AicutError):
+                log.error("project %s failed: %s", project.project_id, exc)
+            else:
+                log.exception("project %s failed", project.project_id)
             self.store.set_status(project.project_id, State.FAILED.value, str(exc))
             ctx.note("error", str(exc))
             return self._finish(ctx, State.FAILED, [], started, record_state=False)

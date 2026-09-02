@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from aicut.media.probe import AudioTrack, MediaInfo
 from aicut.media.stt import (
     FasterWhisperTranscriber,
     TranscriptFileTranscriber,
+    WhisperXTranscriber,
     speaker_reliability,
     utterances_from_whisperx,
     write_transcript,
@@ -151,3 +153,41 @@ class TranscriptRoundTripTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MissingBackendTests(unittest.TestCase):
+    """A missing optional dependency is an instruction, not a traceback.
+
+    WhisperX is the default backend and the one least likely to be installed,
+    so "no module named whisperx" with a stack trace is the most common first
+    run this program has. The other two backends already guarded their imports.
+    """
+
+    def _message(self, transcriber, module: str) -> str:
+        import builtins
+
+        from aicut.errors import AicutError
+        from aicut.media.probe import MediaInfo
+
+        real_import = builtins.__import__
+
+        def refuse(name, *args, **kwargs):
+            if name == module or name.startswith(module + "."):
+                raise ImportError(f"No module named {name!r}")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch.object(builtins, "__import__", refuse):
+            with self.assertRaises(AicutError) as raised:
+                transcriber.transcribe("broadcast.mkv", MediaInfo(path="b.mkv", duration_sec=10.0))
+        return str(raised.exception)
+
+    def test_whisperx_missing_names_every_way_out(self):
+        message = self._message(WhisperXTranscriber(), "whisperx")
+        for alternative in ("aicut[stt]", "faster-whisper", "pocketsphinx",
+                            "--transcript", "--no-stt"):
+            with self.subTest(alternative=alternative):
+                self.assertIn(alternative, message)
+
+    def test_faster_whisper_missing_is_also_an_instruction(self):
+        message = self._message(FasterWhisperTranscriber(), "faster_whisper")
+        self.assertIn("faster-whisper is not installed", message)

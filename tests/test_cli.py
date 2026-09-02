@@ -144,3 +144,83 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportWarningsAreSpokenTests(unittest.TestCase):
+    """report.json is a record, not a report.
+
+    Every one of these already reached the file. 2.6 says a departure from the
+    plan is reported; 16장 says a failed render is visible and does not cost the
+    plan; a source that lies about its length is worth knowing before the
+    operator wonders why a cut came out empty. Pointing at a JSON file is not
+    telling anyone.
+    """
+
+    def _spoken(self, report: dict) -> str:
+        import io
+        from contextlib import redirect_stdout
+
+        from aicut.cli import _print_report_warnings
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            _print_report_warnings(report)
+        return buffer.getvalue()
+
+    def test_a_truncated_source_is_said_out_loud(self):
+        out = self._spoken({"source_warnings": ["the file looks truncated at 19.5s"]})
+        self.assertIn("truncated", out)
+
+    def test_an_impossible_plan_is_said_out_loud(self):
+        out = self._spoken({"implausible_plans": [
+            {"episode_id": "e1", "detail": "planned 90000s from a 3600s source"},
+        ]})
+        self.assertIn("90000s", out)
+        self.assertIn("IMPLAUSIBLE", out)
+
+    def test_a_render_failure_names_the_episode_and_the_recovery(self):
+        out = self._spoken({"render_failures": [
+            {"episode_id": "e2", "error": "ffmpeg said no",
+             "note": "the edit plan survives; re-run the render stage alone (16장)"},
+        ]})
+        self.assertIn("e2", out)
+        self.assertIn("ffmpeg said no", out)
+        self.assertIn("re-run the render", out)
+
+    def test_a_caption_less_render_is_said_out_loud(self):
+        out = self._spoken({"degraded": [
+            {"episode_id": "e3", "reason": "no_subtitles_filter",
+             "detail": "captions were NOT burned in: this ffmpeg has no subtitles filter"},
+        ]})
+        self.assertIn("NOT burned in", out)
+
+    def test_a_length_departure_is_said_out_loud(self):
+        """2.6: the hint is a hint, and a departure from it is reported.
+
+        Built from what planning actually writes, not from what the printer
+        wishes it wrote - the first version of this read a key that does not
+        exist, so the test passed while the real path printed a raw dict.
+        """
+        out = self._spoken({"length_deviations": [
+            {"episode_id": "e4", "hint_sec": 600, "planned_sec": 141.2,
+             "reason": "the content did not fit the hinted length"},
+        ]})
+        self.assertIn("did not fit", out)
+        self.assertIn("141.2s", out)
+        self.assertIn("600s hint", out)
+        self.assertNotIn("{", out, "the raw dict was printed instead of a sentence")
+
+    def test_every_reported_section_is_built_from_what_the_pipeline_writes(self):
+        """Guard against the shape drifting: each key the printer reads must be
+        one the pipeline actually sets."""
+        import inspect
+
+        from aicut.pipeline import planning, rendering
+
+        sources = inspect.getsource(planning) + inspect.getsource(rendering)
+        for key in ("episode_id", "planned_sec", "hint_sec", "reason", "detail", "error", "note"):
+            with self.subTest(key=key):
+                self.assertIn(f'"{key}"', sources)
+
+    def test_a_clean_run_says_nothing(self):
+        self.assertEqual(self._spoken({"episodes": [{"cuts": 3}]}), "")

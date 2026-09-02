@@ -254,36 +254,69 @@ class PocketSphinxTranscriber(Transcriber):
         self._decoder = Decoder(logfn=os.devnull)
         return self._decoder
 
+    #: How much audio to hand the decoder at a time. Small enough that the
+    #: buffer never dominates memory, large enough that the per-call overhead
+    #: is noise: 10s of 16 kHz mono 16-bit is 320 kB.
+    CHUNK_SEC = 10
+
     def transcribe(self, path: str, media: MediaInfo | None = None) -> list[Utterance]:
         decoder = self._load()
-        audio = self._mono_pcm(path)
-        decoder.start_utt()
-        decoder.process_raw(audio, False, True)
-        decoder.end_utt()
-
         speaker = _speaker_from_tracks(media)
-        words = [
-            {"word": seg.word, "start": seg.start_frame / 100.0, "end": seg.end_frame / 100.0}
-            for seg in decoder.seg()
-            if seg.word not in _SPHINX_NOISE
-        ]
+
+        # Streamed, not read whole. Six hours of 16 kHz mono PCM is 691 MB, and
+        # reading it into one bytes object cost 1.6 GB of resident memory before
+        # decoding had even started - on a program that is meant to run on a
+        # desktop (22.1) beside a game capture. The decoder takes it in pieces.
+        words: list[dict] = []
+        offset_sec = 0.0
+        for block in self._stream_mono_pcm(path):
+            decoder.start_utt()
+            decoder.process_raw(block, False, True)
+            decoder.end_utt()
+            words.extend(
+                {
+                    "word": seg.word,
+                    "start": offset_sec + seg.start_frame / 100.0,
+                    "end": offset_sec + seg.end_frame / 100.0,
+                }
+                for seg in decoder.seg()
+                if seg.word not in _SPHINX_NOISE
+            )
+            # The decoder's frame counter restarts with each utterance, so the
+            # block's own start has to be carried or every timestamp collapses
+            # onto the first ten seconds.
+            offset_sec += len(block) / (self.sample_rate * 2)
+
         return group_words_into_utterances(words, speaker=speaker)
 
-    def _mono_pcm(self, path: str) -> bytes:
-        """16 kHz mono PCM, which is all this decoder accepts."""
-        from aicut.media.ffmpeg_util import require_ffmpeg, run
+    def _stream_mono_pcm(self, path: str):
+        """Yield 16 kHz mono PCM in blocks, without ever holding all of it."""
+        from aicut.media.ffmpeg_util import require_ffmpeg
         import subprocess
 
         require_ffmpeg()
-        result = subprocess.run(
+        block_bytes = int(self.CHUNK_SEC * self.sample_rate) * 2
+        proc = subprocess.Popen(
             ["ffmpeg", "-hide_banner", "-v", "error", "-i", path,
              "-ac", "1", "-ar", str(self.sample_rate), "-f", "s16le", "-"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        if result.returncode != 0:
-            raise AicutError(f"could not extract audio from {path}: "
-                             f"{result.stderr.decode('utf-8', 'replace')[-300:]}")
-        return result.stdout
+        try:
+            while True:
+                block = proc.stdout.read(block_bytes)
+                if not block:
+                    break
+                yield block
+        finally:
+            proc.stdout.close()
+            stderr = proc.stderr.read()
+            proc.stderr.close()
+            code = proc.wait()
+        if code != 0:
+            raise AicutError(
+                f"could not extract audio from {path}: "
+                f"{stderr.decode('utf-8', 'replace')[-300:]}"
+            )
 
 
 _SPHINX_NOISE = {"<s>", "</s>", "<sil>", "[SPEECH]", "[NOISE]", "(NULL)", "++UH++", "++UM++"}

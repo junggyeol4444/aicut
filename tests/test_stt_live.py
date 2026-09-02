@@ -123,6 +123,35 @@ class RealRecogniserTests(unittest.TestCase):
             for word in utterance.words:
                 self.assertNotIn("(", word["word"])
 
+    def test_timestamps_survive_the_chunk_boundary(self):
+        """Audio is decoded in blocks so memory does not scale with length.
+
+        The decoder's frame counter restarts on every block, so unless the
+        block's own start is carried, every word after the first chunk lands
+        back at the beginning. This clip is longer than one chunk, so words
+        must appear past it, at the times they were actually spoken.
+        """
+        from aicut.media.stt import PocketSphinxTranscriber
+
+        chunk = PocketSphinxTranscriber.CHUNK_SEC
+        duration = float(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(self.speech)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+        self.assertGreater(duration, chunk, "the fixture must span more than one chunk")
+
+        utterances = self._transcribe()
+        late = [u for u in utterances if u.start_sec > chunk]
+        self.assertTrue(late, f"nothing was recognised past {chunk}s; timestamps collapsed")
+        self.assertLessEqual(
+            max(u.end_sec for u in utterances), duration + 1.0,
+            "a word landed after the end of the audio",
+        )
+        for utterance in utterances:
+            for word in utterance.words:
+                self.assertLessEqual(word["start"], word["end"])
+
     def test_the_transcript_round_trips_into_the_pipeline_format(self):
         from aicut.media.stt import TranscriptFileTranscriber, write_transcript
 

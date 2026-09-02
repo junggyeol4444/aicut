@@ -89,6 +89,10 @@ def _print_report_warnings(report: dict) -> None:
     """
     for warning in report.get("source_warnings", []):
         print(f"\n  SOURCE: {warning}")
+    for entry in report.get("scan_density", []):
+        print(f"\n  SCAN DENSITY: {entry['detail']}")
+    for note in report.get("signal_notes", []):
+        print(f"\n  SIGNAL: {note}")
     for entry in report.get("implausible_plans", []):
         print(f"\n  IMPLAUSIBLE PLAN: {entry['detail']}")
     for entry in report.get("length_deviations", []):

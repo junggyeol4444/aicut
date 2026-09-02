@@ -209,9 +209,21 @@ def load_credentials(client_secrets: str, token_path: str):  # pragma: no cover 
     import json
     from pathlib import Path
 
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
+    try:
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from google.auth.transport.requests import Request
+    except ImportError as exc:
+        # YouTubeClient guards this dependency, but credentials are loaded
+        # first - so the guard sat behind the thing that actually failed and
+        # `aicut upload` ended in a bare ModuleNotFoundError instead.
+        raise AicutError(
+            "the Google API client is not installed, so uploading cannot start.\n"
+            "  pip install 'aicut[youtube]'\n"
+            "Uploading also needs an OAuth client secrets file from the Google Cloud "
+            "console with the YouTube Data API enabled (20.2); pass it with "
+            "--client-secrets. Everything up to the review gate works without any of this."
+        ) from exc
 
     token = Path(token_path)
     creds = None

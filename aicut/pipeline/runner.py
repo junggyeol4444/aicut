@@ -239,6 +239,22 @@ class Pipeline:
         )
 
 
+#: Written during a run but folded into another field of the report rather than
+#: carried through under their own name - `signals`, `episodes`, counters that
+#: only feed a log line. Everything NOT listed here must appear in the report;
+#: `tests/test_consistency.py` enforces it, because a section that is recorded
+#: and then dropped is worse than one that was never recorded: the code that
+#: wrote it looks correct, and its test passes against the context object while
+#: the operator never sees a word.
+REPORT_INTERNAL_KEYS = frozenset({
+    "boundary_hints", "candidates_found", "discovery_note", "edit_plans", "error",
+    "episodes_packaged", "episodes_planned", "episodes_rendered", "events",
+    "first_pass_windows", "media", "second_pass_windows", "situation_mix",
+    "speaker_reliability", "started_at", "upload_queue", "utterance_count",
+    "vocal_bursts",
+})
+
+
 def build_report(ctx: RunContext, state: State, episodes: list[Episode]) -> dict[str, Any]:
     """The work report of 22.6: what was found, what was made, what was refused."""
     candidates = ctx.store.candidates(ctx.project.project_id)
@@ -271,7 +287,19 @@ def build_report(ctx: RunContext, state: State, episodes: list[Episode]) -> dict
             "situation_mix": ctx.report.get("situation_mix", {}),
             "speaker_reliability": ctx.report.get("speaker_reliability"),
         },
+        # Every "<signal>_note" a stage wrote, carried without being named
+        # one by one. These are the disclosures that matter most - no face
+        # signal, no burst detector, untagged speech - and naming them
+        # individually is how three of them came to be dropped. A new one now
+        # reaches the operator without anybody remembering to add it here.
+        "signal_notes": [
+            value for key, value in sorted(ctx.report.items())
+            if key.endswith("_note") and value
+        ],
         "length_deviations": ctx.report.get("length_deviations", []),
+        "implausible_plans": ctx.report.get("implausible_plans", []),
+        "degraded": ctx.report.get("degraded", []),
+        "scan_density": ctx.report.get("scan_density", []),
         "render_failures": ctx.report.get("render_failures", []),
         "no_content_reason": ctx.report.get("no_content_reason"),
         "resumed_from": ctx.report.get("resumed_from"),

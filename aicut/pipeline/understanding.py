@@ -108,6 +108,26 @@ def _first_pass(
     window_sec = ctx.profile.get_float("scan.pass1_window_sec")
     trigger = ctx.profile.get("scan.pass2_trigger")
 
+    # The scan density is a provisional guess (17.5) tuned for a broadcast, and
+    # on a short clip it degenerates: one window means one summary, which means
+    # an event with a single mention, which is below the discovery floor - so
+    # the run ends NO_CONTENT and the reason does not mention the window size
+    # that caused it. Say it here, where both numbers are in hand.
+    if duration < 2 * window_sec:
+        ctx.report.setdefault("scan_density", []).append({
+            "source_sec": round(duration, 1),
+            "pass1_window_sec": window_sec,
+            "windows": max(1, int(duration // window_sec) + (1 if duration % window_sec else 0)),
+            "detail": (
+                f"this source is {duration:.0f}s and the first pass reads it in {window_sec:.0f}s "
+                f"windows, so it gets very few. An event needs "
+                f"{ctx.profile.get('discovery.min_event_mentions')} mentions to be considered, and a "
+                f"mention comes from a window - a short source can therefore produce nothing at all. "
+                f"Lower scan.pass1_window_sec for clips this size (17.1: it is a profile value, "
+                f"not a constant)."
+            ),
+        })
+
     utterances = ctx.store.utterances(ctx.project.project_id)
     sampled = sorted(frames or [])
     summaries: list[WindowSummary] = []

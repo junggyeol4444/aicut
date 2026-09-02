@@ -278,3 +278,114 @@ class OfflineGuardTests(unittest.TestCase):
             for name in functions:
                 with self.subTest(function=f"{module.__name__}.{name}"):
                     self.assertIn("require_ffmpeg()", inspect.getsource(getattr(module, name)))
+
+
+class ReportCompletenessTests(unittest.TestCase):
+    """Anything a stage records must reach the report.
+
+    `build_report` names its fields one by one, so a stage that writes a new
+    section to `ctx.report` gets it silently dropped. That happened to three
+    sections at once - implausible_plans, degraded, scan_density - and every
+    test for them passed, because each asserted against the context object
+    rather than the report the operator actually reads. A recorded-then-dropped
+    section is worse than one never recorded: the code looks right.
+    """
+
+    def _keys_written(self) -> set[str]:
+        import pkgutil
+        import re
+        from pathlib import Path
+
+        import aicut.pipeline
+
+        written = set()
+        for module in pkgutil.iter_modules(aicut.pipeline.__path__):
+            source = (
+                Path(aicut.pipeline.__path__[0]) / f"{module.name}.py"
+            ).read_text(encoding="utf-8")
+            written |= set(re.findall(r'ctx\.report\.setdefault\(\s*"([a-z_]+)"', source))
+            written |= set(re.findall(r'ctx\.note\(\s*"([a-z_]+)"', source))
+        return written
+
+    def _keys_reported(self) -> set[str]:
+        import inspect
+        import re
+
+        from aicut.pipeline import runner
+
+        return set(re.findall(
+            r'ctx\.report\.get\(\s*"([a-z_]+)"', inspect.getsource(runner.build_report)
+        ))
+
+    def test_every_recorded_section_reaches_the_report(self):
+        from aicut.pipeline.runner import REPORT_INTERNAL_KEYS
+
+        import inspect
+
+        from aicut.pipeline import runner
+
+        # build_report sweeps up every "<signal>_note" without naming them.
+        sweeps_notes = 'key.endswith("_note")' in inspect.getsource(runner.build_report)
+        written = self._keys_written()
+        if sweeps_notes:
+            written = {k for k in written if not k.endswith("_note")}
+        missing = written - self._keys_reported() - set(REPORT_INTERNAL_KEYS)
+        self.assertEqual(
+            missing, set(),
+            f"these are written during a run and never reach report.json: {sorted(missing)}. "
+            "Add them to build_report, or to REPORT_INTERNAL_KEYS if another field carries them.",
+        )
+
+    def test_the_internal_list_does_not_excuse_a_key_nobody_writes(self):
+        """A stale entry there would hide a real omission later."""
+        from aicut.pipeline.runner import REPORT_INTERNAL_KEYS
+
+        stale = set(REPORT_INTERNAL_KEYS) - self._keys_written()
+        self.assertEqual(stale, set(), f"REPORT_INTERNAL_KEYS names keys nothing writes: {sorted(stale)}")
+
+
+class OptionalDependencyTests(unittest.TestCase):
+    """A missing optional dependency must be a sentence, not a traceback.
+
+    Two of these were wrong at once and for the same reason. WhisperX - the
+    default STT backend - imported unguarded while the other two backends were
+    careful. And `load_credentials` imported the Google client unguarded, so
+    the guard inside `YouTubeClient` never fired: it sat behind the call that
+    actually failed. Both ended in a bare ModuleNotFoundError on the most
+    ordinary command the user could type.
+    """
+
+    #: Modules that are optional by design, and the function that reaches them
+    #: first when a user runs the obvious command.
+    ENTRY_POINTS = (
+        ("aicut.media.stt", "WhisperXTranscriber", "transcribe"),
+        ("aicut.media.stt", "FasterWhisperTranscriber", "_load"),
+        ("aicut.media.stt", "PocketSphinxTranscriber", "_load"),
+        ("aicut.intelligence.youtube", None, "load_credentials"),
+        ("aicut.intelligence.youtube", "YouTubeClient", "__init__"),
+    )
+
+    def test_every_optional_import_is_guarded_where_it_is_reached(self):
+        import importlib
+        import inspect
+
+        for module_name, class_name, func_name in self.ENTRY_POINTS:
+            with self.subTest(entry=f"{module_name}.{class_name or ''}.{func_name}"):
+                module = importlib.import_module(module_name)
+                owner = getattr(module, class_name) if class_name else module
+                source = inspect.getsource(getattr(owner, func_name))
+                self.assertIn(
+                    "import", source,
+                    "this entry point no longer imports anything; update ENTRY_POINTS",
+                )
+                self.assertIn(
+                    "except ImportError", source,
+                    f"{module_name}.{func_name} imports an optional dependency without "
+                    "catching ImportError, so the user gets a traceback instead of "
+                    "instructions",
+                )
+                self.assertIn(
+                    "AicutError", source,
+                    f"{module_name}.{func_name} catches ImportError but does not raise "
+                    "an AicutError, so the runner cannot tell it from a crash",
+                )

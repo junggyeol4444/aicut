@@ -115,7 +115,9 @@ def plan_episode(
 
     _apply_pacing(ctx, episode)
     timeline = Timeline.from_cuts(episode.timeline)
-    episode.subtitles = _subtitles(episode, timeline, utterances, ctx.signals.speaker_reliability)
+    episode.subtitles = _subtitles(
+        episode, timeline, utterances, ctx.signals.speaker_reliability, ctx=ctx,
+    )
     episode.planned_duration_sec = timeline.duration
     _note_length_deviation(ctx, episode, structure)
     _note_implausible_plan(ctx, episode)
@@ -256,10 +258,23 @@ def _subtitles(
     timeline: Timeline,
     utterances: list[Utterance],
     speaker_reliability: float,
+    *,
+    ctx: RunContext | None = None,
 ) -> list[SubtitleLine]:
-    """Place speech on the output clock, splitting lines that straddle a removal."""
+    """Place speech on the output clock, splitting lines that straddle a removal.
+
+    Words the recogniser was not confident about are left out. A recogniser
+    given music or room tone does not return nothing - it returns words, with
+    low scores, and burning them in puts invented sentences on screen for the
+    length of the video. Measured on a real film: a passage with no dialogue
+    produced "whom moon when he first thing and that", burned in.
+    """
     lines: list[SubtitleLine] = []
     per_speaker_styles = speaker_reliability >= 0.9      # 16장: off when tags are unreliable
+    floor = ctx.profile.get_float("subtitle.min_word_confidence") if ctx else 0.0
+    keep_ratio = ctx.profile.get_float("subtitle.min_kept_word_ratio") if ctx else 0.0
+    dropped = 0
+    scored_words = 0
 
     for segment in timeline.segments:
         for utterance in utterances:
@@ -269,8 +284,18 @@ def _subtitles(
                 continue
             out_start = segment.out_start_sec + (start - segment.source_start_sec)
             out_end = segment.out_start_sec + (end - segment.source_start_sec)
-            text = _clip_text(utterance, start, end)
+            text, seen, kept = _clip_text(utterance, start, end, floor)
+            scored_words += seen
             if not text:
+                # Empty because every word was doubted is a drop, not an
+                # absence, and 2.6 wants it counted rather than passed over.
+                if seen and not kept:
+                    dropped += 1
+                continue
+            # A line that lost most of its words to the confidence floor is not
+            # a line worth showing; what is left is a fragment of a guess.
+            if seen and kept / seen < keep_ratio:
+                dropped += 1
                 continue
             style = None
             if per_speaker_styles and utterance.speaker not in (UNKNOWN_SPEAKER, ""):
@@ -280,18 +305,57 @@ def _subtitles(
                 speaker=utterance.speaker, style=style,
             ))
     lines.sort(key=lambda l: l.start_sec)
+
+    if ctx is not None:
+        if dropped:
+            ctx.report.setdefault("subtitles_dropped", []).append({
+                "episode_id": episode.episode_id,
+                "lines": dropped,
+                "floor": floor,
+                "detail": (
+                    f"{dropped} subtitle line(s) dropped: the recogniser scored their words "
+                    f"below subtitle.min_word_confidence={floor}. Lower it if real speech is "
+                    "going missing (17.1: it is a profile value)."
+                ),
+            })
+        elif not scored_words and lines:
+            # PocketSphinx returns no score at all, so nothing can be filtered
+            # and a passage of music becomes a burned-in sentence. Say so rather
+            # than let the operator assume the captions were checked.
+            ctx.report.setdefault("subtitle_confidence_note", (
+                "this STT backend reports no per-word confidence, so no caption could be "
+                "checked against subtitle.min_word_confidence - music or room tone can "
+                "become invented text on screen. faster-whisper and whisperx do report it."
+            ))
     return lines
 
 
-def _clip_text(utterance: Utterance, start: float, end: float) -> str:
-    """Use word timings to keep only the words that survive inside the span."""
+def _clip_text(utterance: Utterance, start: float, end: float, floor: float = 0.0):
+    """Keep the words inside the span that the recogniser stood behind.
+
+    Returns the text, how many words carried a score at all, and how many of
+    those cleared the floor. A backend that reports no score - PocketSphinx has
+    none to give - leaves `seen` at zero, and nothing is dropped: not knowing a
+    word is wrong is not the same as knowing it is.
+    """
     if not utterance.words:
-        return utterance.text
-    words = [
-        w["word"] for w in utterance.words
+        return utterance.text, 0, 0
+    inside = [
+        w for w in utterance.words
         if w.get("start") is not None and start - 0.05 <= float(w["start"]) <= end + 0.05
     ]
-    return " ".join(w.strip() for w in words if w).strip() or ""
+    seen = kept = 0
+    words = []
+    for word in inside:
+        score = word.get("score")
+        if score is None:
+            words.append(word["word"])
+            continue
+        seen += 1
+        if float(score) >= floor:
+            kept += 1
+            words.append(word["word"])
+    return " ".join(w.strip() for w in words if w).strip() or "", seen, kept
 
 
 def _note_implausible_plan(ctx: RunContext, episode: Episode) -> None:

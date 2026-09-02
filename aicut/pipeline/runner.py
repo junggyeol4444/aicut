@@ -300,6 +300,7 @@ def build_report(ctx: RunContext, state: State, episodes: list[Episode]) -> dict
         "implausible_plans": ctx.report.get("implausible_plans", []),
         "degraded": ctx.report.get("degraded", []),
         "scan_density": ctx.report.get("scan_density", []),
+        "subtitles_dropped": ctx.report.get("subtitles_dropped", []),
         "render_failures": ctx.report.get("render_failures", []),
         "no_content_reason": ctx.report.get("no_content_reason"),
         "resumed_from": ctx.report.get("resumed_from"),

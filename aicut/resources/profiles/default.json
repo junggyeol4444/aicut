@@ -15,6 +15,7 @@
       "scan.pass2_trigger",
       "silence",
       "situation",
+      "subtitle",
       "tension",
       "thumbnail",
       "topic_shift"
@@ -110,6 +111,10 @@
       "screen_event": 0.2
     },
     "min_gap_sec": 5.0
+  },
+  "subtitle": {
+    "min_word_confidence": 0.35,
+    "min_kept_word_ratio": 0.5
   },
   "render": {
     "video": {

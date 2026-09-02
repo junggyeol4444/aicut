@@ -191,3 +191,68 @@ class MissingBackendTests(unittest.TestCase):
     def test_faster_whisper_missing_is_also_an_instruction(self):
         message = self._message(FasterWhisperTranscriber(), "faster_whisper")
         self.assertIn("faster-whisper is not installed", message)
+
+
+class SilentBlockTests(unittest.TestCase):
+    """A block with no speech in it must not end the run.
+
+    PocketSphinx returns None from `seg()` rather than an empty sequence when a
+    block decodes to nothing. Every fixture here was speech end to end, so this
+    never came up until a real film went through: music and sound effects with
+    no dialogue, which is what most of a game broadcast sounds like.
+
+        TypeError: 'NoneType' object is not iterable
+    """
+
+    class _MuteDecoder:
+        """Decodes everything to nothing, the way silence and music do."""
+
+        def __init__(self):
+            self.blocks = 0
+
+        def start_utt(self):
+            pass
+
+        def process_raw(self, block, a, b):
+            self.blocks += 1
+
+        def end_utt(self):
+            pass
+
+        def seg(self):
+            return None
+
+    def test_a_block_that_recognises_nothing_yields_no_words(self):
+        from aicut.media.stt import PocketSphinxTranscriber
+
+        decoder = self._MuteDecoder()
+        transcriber = PocketSphinxTranscriber(decoder=decoder)
+        with mock.patch.object(
+            PocketSphinxTranscriber, "_stream_mono_pcm",
+            return_value=iter([b"\x00" * 32000, b"\x00" * 32000]),
+        ):
+            self.assertEqual(transcriber.transcribe("silent.wav"), [])
+        self.assertEqual(decoder.blocks, 2, "both blocks should still have been offered")
+
+    def test_speech_after_a_silent_block_keeps_its_real_timestamps(self):
+        """The offset must advance across blocks that produced nothing."""
+        from aicut.media.stt import PocketSphinxTranscriber
+
+        class _Seg:
+            def __init__(self, word, start, end):
+                self.word, self.start_frame, self.end_frame = word, start, end
+
+        class _LateDecoder(self._MuteDecoder):
+            def seg(self):
+                # Nothing in the first block, one word in the second.
+                return None if self.blocks < 2 else [_Seg("hello", 50, 100)]
+
+        transcriber = PocketSphinxTranscriber(decoder=_LateDecoder())
+        block = b"\x00" * (16000 * 2 * PocketSphinxTranscriber.CHUNK_SEC)
+        with mock.patch.object(
+            PocketSphinxTranscriber, "_stream_mono_pcm", return_value=iter([block, block]),
+        ):
+            utterances = transcriber.transcribe("late.wav")
+        self.assertEqual(len(utterances), 1)
+        word = utterances[0].words[0]
+        self.assertAlmostEqual(word["start"], PocketSphinxTranscriber.CHUNK_SEC + 0.5, places=2)

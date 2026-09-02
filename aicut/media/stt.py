@@ -273,13 +273,17 @@ class PocketSphinxTranscriber(Transcriber):
             decoder.start_utt()
             decoder.process_raw(block, False, True)
             decoder.end_utt()
+            # A block with no speech in it - music, room tone, a game with
+            # nobody talking over it - decodes to nothing, and the decoder
+            # returns None rather than an empty sequence. Real footage is full
+            # of those; a fixture made of nothing but speech never hits one.
             words.extend(
                 {
                     "word": seg.word,
                     "start": offset_sec + seg.start_frame / 100.0,
                     "end": offset_sec + seg.end_frame / 100.0,
                 }
-                for seg in decoder.seg()
+                for seg in (decoder.seg() or ())
                 if seg.word not in _SPHINX_NOISE
             )
             # The decoder's frame counter restarts with each utterance, so the

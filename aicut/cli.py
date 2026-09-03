@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -866,6 +867,15 @@ def cmd_doctor(args) -> int:
     }
     for name, ok in checks.items():
         print(f"  [{'ok' if ok else '--'}] {name}")
+
+    # The key is what `--producer anthropic` needs and the one precondition
+    # that is not a package: a run without it gets through parsing and STT
+    # before failing, which is twenty minutes to learn one export line. The
+    # value is never printed - only whether the environment has one.
+    if args.producer == "anthropic" or _importable("anthropic"):
+        has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        print(f"  [{'ok' if has_key else '--'}] ANTHROPIC_API_KEY set"
+              f"{'' if has_key else ' (needed by --producer anthropic)'}")
 
     # Having ffmpeg is not the same as having the ffmpeg this needs: the plain
     # Homebrew bottle links no libass, so `subtitles` is absent and captions

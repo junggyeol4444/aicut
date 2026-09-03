@@ -4,6 +4,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -270,3 +271,39 @@ class FlagPlacementTests(unittest.TestCase):
             with self.subTest(command=command):
                 parsed = self.parser.parse_args([command] + extra + ["--producer", "anthropic"])
                 self.assertEqual(parsed.producer, "anthropic")
+
+
+class DoctorTests(unittest.TestCase):
+    """`aicut doctor` exists so a run does not die twenty minutes in on a
+    precondition that was knowable before it started."""
+
+    def _doctor(self, argv, env):
+        import io
+        import os
+        from contextlib import redirect_stdout
+        from unittest import mock
+
+        from aicut.cli import build_parser, cmd_doctor
+
+        args = build_parser().parse_args(["doctor"] + argv)
+        buffer = io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=False), redirect_stdout(buffer):
+            cmd_doctor(args)
+        return buffer.getvalue()
+
+    def test_a_missing_key_is_said_before_the_run_not_during(self):
+        import os
+
+        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            out = self._doctor(["--producer", "anthropic"], {})
+        self.assertIn("ANTHROPIC_API_KEY", out)
+        self.assertIn("--producer anthropic", out)
+
+    def test_the_key_itself_is_never_printed(self):
+        """Whether one is set is the answer; the value is a secret and doctor
+        output is the first thing anyone pastes into a bug report."""
+        out = self._doctor(["--producer", "anthropic"],
+                           {"ANTHROPIC_API_KEY": "sk-ant-secret-value"})
+        self.assertNotIn("sk-ant-secret-value", out)
+        self.assertIn("[ok] ANTHROPIC_API_KEY set", out)

@@ -27,6 +27,10 @@ yaml = ["PyYAML"]
 [project.scripts]
 aicut = "aicut.cli:main"
 
+[project.gui-scripts]
+# Double-clicked rather than typed: on Windows this gets a console-less launcher.
+aicut-desktop = "aicut.desktop:main"
+
 [tool.setuptools.packages.find]
 include = ["aicut*"]
 

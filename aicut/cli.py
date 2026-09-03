@@ -832,6 +832,28 @@ def cmd_benchmark(args) -> int:
     return 0
 
 
+def cmd_fetch_ffmpeg(args) -> int:
+    """Install a static ffmpeg beside the projects (20.1)."""
+    from aicut.media.ffmpeg_fetch import FetchRefused, bundled_ffmpeg, fetch, platform_build
+
+    if have_ffmpeg() and not args.force:
+        print("ffmpeg is already on PATH; nothing to do (--force to fetch anyway)")
+        return 0
+    already = bundled_ffmpeg(args.workspace)
+    if already and not args.force:
+        print(f"already installed at {already.parent}")
+        return 0
+    build = platform_build()
+    print(f"fetching {build.url}")
+    try:
+        target = fetch(args.workspace)
+    except FetchRefused as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"installed into {target}")
+    return 0
+
+
 def cmd_doctor(args) -> int:
     """Check the preconditions of 20.2 before a run rather than during one."""
     checks = {
@@ -1044,6 +1066,10 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--frames", action="store_true",
                            help="also time frame sampling and face detection")
     benchmark.set_defaults(func=cmd_benchmark)
+
+    fetch_p = sub.add_parser("fetch-ffmpeg", help="download a static ffmpeg into the workspace")
+    fetch_p.add_argument("--force", action="store_true", help="fetch even if one is already present")
+    fetch_p.set_defaults(func=cmd_fetch_ffmpeg)
 
     doctor = sub.add_parser("doctor", help="check the prerequisites of 20.2")
     doctor.set_defaults(func=cmd_doctor)

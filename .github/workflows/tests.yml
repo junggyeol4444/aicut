@@ -179,3 +179,53 @@ jobs:
           assert SubtitleStyleProfile.load('default').resolved('default')['fontname']
           print('installed package loads its own resources')
           "
+
+  desktop:
+    # 22.1 asks for a program, not a command. An executable nobody has run is
+    # not a deliverable, so this builds it on every platform it claims to ship
+    # on and then RUNS it - from outside the checkout, so a build that only
+    # works next to its own source fails here.
+    name: desktop build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PyInstaller
+        run: pip install --quiet pyinstaller
+      - name: Build the executable
+        run: python -m PyInstaller --clean --noconfirm aicut.spec
+      - name: Run it from somewhere that is not the checkout
+        shell: bash
+        run: |
+          set -e
+          # Not `[ ... ] && exe=...`: under `set -e` the false branch returns 1
+          # and kills the step on every platform that is not Windows.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            exe="$PWD/dist/aicut.exe"
+          else
+            exe="$PWD/dist/aicut"
+          fi
+          cd "$RUNNER_TEMP"
+          "$exe" --check --workspace "$RUNNER_TEMP/aicut-ws" --no-browser
+      - name: The workspace it chose must be writable and outside the checkout
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, ".")
+          from aicut.desktop import default_workspace
+          target = default_workspace()
+          target.mkdir(parents=True, exist_ok=True)
+          probe = target / "writable.check"
+          probe.write_text("ok", encoding="utf-8")
+          assert probe.read_text(encoding="utf-8") == "ok"
+          probe.unlink()
+          print(f"workspace {target} is writable")
+          PY

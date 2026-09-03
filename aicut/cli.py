@@ -252,6 +252,45 @@ def cmd_render(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    """Hand the plan to a video editor instead of rendering it (22.5)."""
+    from aicut.render.exchange import export
+
+    plan = EditPlan.load(args.plan)
+
+    # The source's real shape and length, when it can be read. Guessing them
+    # makes an importer letterbox the clip or cut the timeline short.
+    size = duration = None
+    if have_ffmpeg() and Path(plan.source_path).exists():
+        from aicut.media.probe import probe
+
+        media = probe(plan.source_path)
+        if media.width and media.height:
+            size = (media.width, media.height)
+        duration = media.duration_sec or None
+    else:
+        print("  note: the source file was not readable here, so the FCPXML declares the "
+              "sequence's own size for it - relink in the editor if the clip looks stretched")
+
+    formats = args.format or ["fcpxml"]
+    out = Path(args.out) if args.out else Path(args.plan).parent
+    # --out is a file only when one format is asked for AND it is not an
+    # existing directory; otherwise it names where the files go.
+    as_directory = out.is_dir() or len(formats) > 1 or not args.out
+
+    written = []
+    for fmt in formats:
+        suffix = {"edl": ".edl", "fcpxml": ".fcpxml", "srt": ".srt"}[fmt]
+        target = (out / f"{plan.episode_id}{suffix}") if as_directory else out
+        written.append(export(plan, target, fmt=fmt, fps=args.fps,
+                              source_size=size, source_duration_sec=duration))
+    for path in written:
+        print(f"wrote {path}")
+    print("  open it in Premiere Pro, DaVinci Resolve or Final Cut; the cuts are the "
+          "same ones `aicut render` would make")
+    return 0
+
+
 def cmd_review(args) -> int:
     """The mandatory gate of 11.3: nothing is published without passing here."""
     store = _store(args)
@@ -908,6 +947,16 @@ def build_parser() -> argparse.ArgumentParser:
     render = sub.add_parser("render", help="render (or re-render) from an edit plan")
     render.add_argument("plan")
     render.set_defaults(func=cmd_render)
+
+    export_p = sub.add_parser("export", help="write the plan as EDL/FCPXML/SRT for a video editor")
+    export_p.add_argument("plan")
+    export_p.add_argument("--format", action="append",
+                          choices=["edl", "fcpxml", "srt"],
+                          help="repeatable; defaults to fcpxml")
+    export_p.add_argument("--fps", type=float, default=None,
+                          help="the editor sequence's frame rate (24, 25, 30, 29.97, ...)")
+    export_p.add_argument("--out", default=None, help="output file, or a directory for several")
+    export_p.set_defaults(func=cmd_export)
 
     review = sub.add_parser("review", help="approve or reject an episode (11.3 gate)")
     review.add_argument("episode")

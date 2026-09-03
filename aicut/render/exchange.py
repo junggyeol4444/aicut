@@ -23,12 +23,17 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import quote
 
 from aicut.errors import AicutError
 from aicut.render.editplan import EditPlan
 from aicut.render.timeline import Segment, Timeline
+
+#: `C:\...` or `C:/...` - an absolute path on Windows, wherever this runs.
+_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 
 #: Frame rates an EDL timecode can be written for without lying about it.
 #: 23.976, 29.97 and 59.94 are counted at the nearest whole rate, which is what
@@ -107,19 +112,57 @@ def to_edl(plan: EditPlan, fps: float, *, title: str | None = None) -> str:
         rec_in = timecode(segment.out_start_sec, fps)
         rec_out = timecode(segment.out_start_sec + segment.duration, fps)
         lines.append(f"{index:03d}  {reel} AA/V  C        {src_in} {src_out} {rec_in} {rec_out}")
-        lines.append(f"* FROM CLIP NAME: {Path(plan.source_path).name}")
+        lines.append(f"* FROM CLIP NAME: {source_name(plan.source_path)}")
     return "\n".join(lines) + "\n"
 
 
 def _reel_name(source_path: str) -> str:
     """EDL reel names are 8 characters of A-Z0-9 in practice; anything else
     gets mangled differently by every editor, so it is normalised here."""
-    stem = Path(source_path).stem.upper()
-    cleaned = "".join(c for c in stem if c.isascii() and c.isalnum())
+    name = source_name(source_path)
+    stem = name.rpartition(".")[0] or name
+    cleaned = "".join(c for c in stem.upper() if c.isascii() and c.isalnum())
     return (cleaned or "AICUT")[:8].ljust(8)
 
 
 # ---------------------------------------------------------------------------
+
+def source_name(path: str) -> str:
+    """The file's own name, whichever platform wrote the path.
+
+    `Path(...).name` reads the separators of the machine it runs on, so a
+    Windows path in a plan opened on Linux keeps its whole `C:\\Users\\...`
+    prefix as the "name" - which then goes in the timeline as the clip label.
+    """
+    return path.replace("\\", "/").rstrip("/").rpartition("/")[2] or path
+
+
+def media_src(path: str) -> str:
+    """The `src` of a media-rep: a URL, percent-encoded, on every platform.
+
+    `Path.as_uri()` cannot do this job. It refuses relative paths, and its idea
+    of "absolute" is the platform's: a plan written on Linux carries
+    `/broadcasts/x.mkv`, which Windows reads as relative, so the export fell
+    through to a bare path with raw spaces in it - an importer then either
+    fails to relink or silently takes the space as the end of the name. Windows
+    CI caught exactly that.
+
+    So the shape is read from the string, not from the running platform.
+    """
+    if "://" in path:                                  # already a URL
+        return path
+    windows_absolute = bool(_DRIVE.match(path))
+    text = path.replace("\\", "/") if windows_absolute or "\\" in path else path
+    # ':' stays literal so a drive letter survives; everything else that is not
+    # URL-safe is encoded, which is what puts %20 in place of a space.
+    quoted = quote(text, safe="/:")
+    if windows_absolute:
+        return "file:///" + quoted
+    if text.startswith("/"):
+        return "file://" + quoted
+    return quoted                                      # relative: a relative URL
+
+
 def to_fcpxml(
     plan: EditPlan,
     fps: float,
@@ -146,8 +189,9 @@ def to_fcpxml(
     segments = _segments(plan)
     total = sum(s.duration for s in segments)
     src_dur = source_duration_sec or max(s.source_end_sec for s in segments)
-    source = Path(plan.source_path)
-    src_uri = source.resolve().as_uri() if source.is_absolute() else source.as_posix()
+    name = source_name(plan.source_path)
+    stem = name.rpartition(".")[0] or name
+    src_uri = media_src(plan.source_path)
 
     seq_w = plan.render_settings.get("width") or 1920
     seq_h = plan.render_settings.get("height") or 1080
@@ -165,7 +209,7 @@ def to_fcpxml(
         f' width="{seq_w}" height="{seq_h}"/>',
         f'    <format id="r3" name="AicutSource" frameDuration="{frame_num}/{frame_den}s"'
         f' width="{src_w}" height="{src_h}"/>',
-        f'    <asset id="r2" name="{html.escape(source.name)}" start="0s"'
+        f'    <asset id="r2" name="{html.escape(name)}" start="0s"'
         f' duration="{rational(src_dur)}" hasVideo="1" hasAudio="1" format="r3">',
         f'      <media-rep kind="original-media" src="{html.escape(src_uri)}"/>',
         "    </asset>",
@@ -179,7 +223,7 @@ def to_fcpxml(
     ]
     for segment in segments:
         out.append(
-            f'            <asset-clip ref="r2" name="{html.escape(source.stem)}"'
+            f'            <asset-clip ref="r2" name="{html.escape(stem)}"'
             f' offset="{rational(segment.out_start_sec)}"'
             f' start="{rational(segment.source_start_sec)}"'
             f' duration="{rational(segment.duration)}"/>'

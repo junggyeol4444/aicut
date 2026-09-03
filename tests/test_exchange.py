@@ -17,6 +17,7 @@ from aicut.models import Cut, Episode, SubtitleLine
 from aicut.render.editplan import EditPlan
 from aicut.render.exchange import (
     UnsupportedFrameRate,
+    media_src,
     timecode,
     to_edl,
     to_fcpxml,
@@ -145,6 +146,48 @@ class FcpxmlTests(unittest.TestCase):
     def test_the_source_is_referenced_by_path(self):
         rep = next(self.root.iter("media-rep"))
         self.assertIn("stream%20one.mkv", rep.get("src"))
+
+
+class MediaSrcTests(unittest.TestCase):
+    """The `src` must be a URL on whatever machine the export runs on.
+
+    This was written with `Path.as_uri()`, whose idea of absolute is the
+    running platform's. A plan written on Linux carries `/broadcasts/x.mkv`,
+    Windows reads that as relative, and the export emitted a bare path with raw
+    spaces in it - which an importer either fails to relink or truncates at the
+    space. Windows CI caught it; these tests are what keeps it caught.
+    """
+
+    def test_a_posix_path_is_a_file_url_with_spaces_encoded(self):
+        self.assertEqual(media_src("/broadcasts/stream one.mkv"),
+                         "file:///broadcasts/stream%20one.mkv")
+
+    def test_a_windows_path_keeps_its_drive_and_turns_slashes_round(self):
+        self.assertEqual(media_src(r"C:\Users\j\stream one.mkv"),
+                         "file:///C:/Users/j/stream%20one.mkv")
+
+    def test_a_relative_path_stays_relative_but_is_still_encoded(self):
+        self.assertEqual(media_src("clips/stream one.mkv"), "clips/stream%20one.mkv")
+
+    def test_a_url_is_left_alone(self):
+        self.assertEqual(media_src("file:///already/encoded%20name.mkv"),
+                         "file:///already/encoded%20name.mkv")
+
+    def test_a_windows_path_read_on_linux_still_names_the_clip(self):
+        """`Path(...).name` reads the separators of the machine it runs on, so
+        a Windows path opened on Linux kept its whole drive prefix and that
+        went into the timeline as the clip label."""
+        from aicut.render.exchange import source_name
+
+        self.assertEqual(source_name(r"C:\Users\j\stream.mkv"), "stream.mkv")
+        self.assertEqual(source_name("/broadcasts/stream.mkv"), "stream.mkv")
+        self.assertEqual(source_name("stream.mkv"), "stream.mkv")
+
+    def test_a_korean_name_is_encoded_not_dropped(self):
+        src = media_src("/방송/한글 이름 (2026).mkv")
+        self.assertTrue(src.startswith("file:///"))
+        self.assertNotIn(" ", src)
+        self.assertTrue(src.isascii(), "an XML attribute an importer must parse")
 
     def test_ntsc_times_are_rational_not_decimal(self):
         root = ET.fromstring(to_fcpxml(_plan([Cut(0, 0.0, 1.001)],

@@ -79,12 +79,20 @@ class ShapeTests(unittest.TestCase):
 class _FakeAnthropicModule(types.ModuleType):
     """Minimal stand-in for the anthropic package."""
 
-    def __init__(self, replies, failures=0):
+    def __init__(self, replies, failures=0, *, raises=None, stop_reason="end_turn"):
         super().__init__("anthropic")
         self.replies = list(replies)
         self.failures = failures
+        self.raises = raises
+        self.stop_reason = stop_reason
         self.calls: list[dict] = []
         module = self
+
+        # The real package's exception classes, by name, because the provider
+        # decides what to retry by looking them up on the module.
+        for name in ("AuthenticationError", "PermissionDeniedError", "NotFoundError",
+                     "BadRequestError", "UnprocessableEntityError", "APIStatusError"):
+            setattr(self, name, type(name, (Exception,), {}))
 
         class _Block:
             def __init__(self, text):
@@ -94,10 +102,13 @@ class _FakeAnthropicModule(types.ModuleType):
         class _Response:
             def __init__(self, text):
                 self.content = [_Block(text)]
+                self.stop_reason = module.stop_reason
 
         class _Messages:
             def create(self, **kwargs):
                 module.calls.append(kwargs)
+                if module.raises is not None:
+                    raise module.raises
                 if module.failures > 0:
                     module.failures -= 1
                     raise RuntimeError("overloaded_error")
@@ -124,11 +135,20 @@ class AnthropicProducerTests(unittest.TestCase):
             sys.modules["anthropic"] = self._saved
         self._tmp.cleanup()
 
-    def _build(self, replies, *, failures=0, **kwargs):
+    def _build(self, replies, *, failures=0, raises=None, stop_reason="end_turn", **kwargs):
         from aicut.llm.anthropic_provider import AnthropicProducer
 
-        sys.modules["anthropic"] = _FakeAnthropicModule(replies, failures)
+        sys.modules["anthropic"] = _FakeAnthropicModule(
+            replies, failures, raises=raises, stop_reason=stop_reason)
         return AnthropicProducer(api_key="test-key", max_retries=3, **kwargs), sys.modules["anthropic"]
+
+    def _no_sleeping(self):
+        """Retry backoff is tested elsewhere; here it would only cost seconds."""
+        import aicut.llm.anthropic_provider as module
+
+        original = module.time.sleep
+        module.time.sleep = lambda _s: None
+        self.addCleanup(lambda: setattr(module.time, "sleep", original))
 
     def test_a_reply_is_parsed_and_the_task_prompt_is_sent(self):
         producer, fake = self._build(['{"structure_name": "result_first", "beats": []}'])
@@ -165,6 +185,41 @@ class AnthropicProducerTests(unittest.TestCase):
                 producer.plan_structure({})
         finally:
             module.time.sleep = original_sleep
+
+    def test_a_rejected_key_fails_at_once_instead_of_three_times(self):
+        """A bad key fails the same way on every attempt. Retrying it spends
+        the caller's minutes and buries the one line saying what to fix."""
+        self._no_sleeping()
+        producer, fake = self._build([])
+        fake.raises = fake.AuthenticationError("invalid x-api-key")
+        with self.assertRaises(ProviderError) as raised:
+            producer.plan_structure({})
+        self.assertEqual(len(fake.calls), 1, "a rejected key was retried")
+        self.assertIn("ANTHROPIC_API_KEY", str(raised.exception))
+
+    def test_a_model_this_key_cannot_reach_says_which(self):
+        self._no_sleeping()
+        producer, fake = self._build([])
+        fake.raises = fake.NotFoundError("model not found")
+        with self.assertRaises(ProviderError) as raised:
+            producer.plan_structure({})
+        self.assertIn("claude-sonnet-5", str(raised.exception))
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_overload_is_still_retried(self):
+        """The fail-fast rule must not swallow the failures worth retrying."""
+        self._no_sleeping()
+        producer, fake = self._build(['{"ok": true}'], failures=2)
+        self.assertEqual(producer.plan_structure({}), {"ok": True})
+        self.assertEqual(len(fake.calls), 3)
+
+    def test_a_reply_cut_off_at_the_token_limit_says_so(self):
+        """Truncated JSON otherwise surfaces as "no parsable JSON", which sends
+        the reader to the prompt instead of to the limit that stopped it."""
+        producer, _ = self._build(['{"beats": [{"name": "hook"'], stop_reason="max_tokens")
+        with self.assertRaises(ProviderError) as raised:
+            producer.plan_structure({})
+        self.assertIn("token limit", str(raised.exception))
 
     def test_the_exchange_can_be_kept_for_audit(self):
         """15.4: a judgement a reviewer disputes is only checkable if the

@@ -927,7 +927,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="process one broadcast end to end")
+    # The same global flags again, accepted AFTER the subcommand as well:
+    # `aicut run film.mkv --producer anthropic` is what people type, and
+    # argparse's answer to it is "unrecognized arguments", which reads like the
+    # option does not exist. SUPPRESS is what makes this safe - without it each
+    # subparser would write its own default over the value given before the
+    # subcommand, so `aicut --producer anthropic run ...` would silently run on
+    # the mock.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--workspace", default=argparse.SUPPRESS)
+    common.add_argument("--profile", default=argparse.SUPPRESS)
+    common.add_argument("--producer", default=argparse.SUPPRESS, choices=["mock", "anthropic"])
+    common.add_argument("--strict", action="store_true", default=argparse.SUPPRESS)
+    common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
+
+    def _sub(name, **kwargs):
+        kwargs["parents"] = list(kwargs.get("parents", ())) + [common]
+        return sub.add_parser(name, **kwargs)
+
+    run = _sub("run", help="process one broadcast end to end")
     run.add_argument("source", help="the livestream file (.mp4/.mkv)")
     run.add_argument("--transcript", help="use an existing WhisperX-shaped transcript instead of running STT")
     run.add_argument("--no-stt", action="store_true", help="skip STT entirely (uses stored utterances)")
@@ -945,32 +963,32 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-diarize", action="store_true")
     run.set_defaults(func=cmd_run)
 
-    resume = sub.add_parser("resume", help="continue a project that stopped part way (16장)")
+    resume = _sub("resume", help="continue a project that stopped part way (16장)")
     resume.add_argument("project")
     resume.add_argument("--transcript")
     resume.add_argument("--no-render", action="store_true")
     resume.set_defaults(func=cmd_resume)
 
-    status = sub.add_parser("status", help="list projects or show one")
+    status = _sub("status", help="list projects or show one")
     status.add_argument("project", nargs="?")
     status.set_defaults(func=cmd_status)
 
-    candidates = sub.add_parser("candidates", help="review discovered candidates (15.4)")
+    candidates = _sub("candidates", help="review discovered candidates (15.4)")
     candidates.add_argument("project")
     candidates.add_argument("--candidate")
     candidates.add_argument("--verdict", choices=["agree", "disagree"])
     candidates.add_argument("--note")
     candidates.set_defaults(func=cmd_candidates)
 
-    plan = sub.add_parser("plan", help="print an edit plan in human form")
+    plan = _sub("plan", help="print an edit plan in human form")
     plan.add_argument("plan")
     plan.set_defaults(func=cmd_plan)
 
-    render = sub.add_parser("render", help="render (or re-render) from an edit plan")
+    render = _sub("render", help="render (or re-render) from an edit plan")
     render.add_argument("plan")
     render.set_defaults(func=cmd_render)
 
-    export_p = sub.add_parser("export", help="write the plan as EDL/FCPXML/SRT for a video editor")
+    export_p = _sub("export", help="write the plan as EDL/FCPXML/SRT for a video editor")
     export_p.add_argument("plan")
     export_p.add_argument("--format", action="append",
                           choices=["edl", "fcpxml", "srt"],
@@ -980,17 +998,17 @@ def build_parser() -> argparse.ArgumentParser:
     export_p.add_argument("--out", default=None, help="output file, or a directory for several")
     export_p.set_defaults(func=cmd_export)
 
-    review = sub.add_parser("review", help="approve or reject an episode (11.3 gate)")
+    review = _sub("review", help="approve or reject an episode (11.3 gate)")
     review.add_argument("episode")
     review.add_argument("action", choices=["approve", "reject"])
     review.add_argument("--reviewer", required=True)
     review.add_argument("--note")
     review.set_defaults(func=cmd_review)
 
-    quota = sub.add_parser("quota", help="YouTube quota state and the next PT reset (11.4)")
+    quota = _sub("quota", help="YouTube quota state and the next PT reset (11.4)")
     quota.set_defaults(func=cmd_quota)
 
-    calibrate = sub.add_parser("calibrate", help="sweep parameters against a labelled dataset (17.4)")
+    calibrate = _sub("calibrate", help="sweep parameters against a labelled dataset (17.4)")
     calibrate.add_argument("--init", action="store_true",
                            help="17.4 step 1: measure starting values from a processed broadcast")
     calibrate.add_argument("--project", help="which project's cached signals to measure (--init)")
@@ -1001,11 +1019,11 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--out")
     calibrate.set_defaults(func=cmd_calibrate)
 
-    prof = sub.add_parser("profile", help="show a calibration profile and what is still a guess")
+    prof = _sub("profile", help="show a calibration profile and what is still a guess")
     prof.add_argument("--list", action="store_true", help="list the profiles measured so far (13장)")
     prof.set_defaults(func=cmd_profile)
 
-    learn = sub.add_parser("learn", help="run a learning loop (12.3)")
+    learn = _sub("learn", help="run a learning loop (12.3)")
     learn.add_argument("loop", choices=["reference", "pairs", "performance"])
     learn.add_argument("--query", action="append", help="reference search query (loop A, repeatable)")
     learn.add_argument("--per-query", type=int, default=25)
@@ -1019,7 +1037,7 @@ def build_parser() -> argparse.ArgumentParser:
     learn.add_argument("--token")
     learn.set_defaults(func=cmd_learn)
 
-    upload = sub.add_parser("upload", help="upload privately, publish an approved episode, or retry (11.3, 11.4)")
+    upload = _sub("upload", help="upload privately, publish an approved episode, or retry (11.3, 11.4)")
     upload.add_argument("episode", nargs="?")
     upload.add_argument("--publish", action="store_true", help="make an approved episode public")
     upload.add_argument("--retry", action="store_true", help="drain the quota retry queue")
@@ -1028,12 +1046,12 @@ def build_parser() -> argparse.ArgumentParser:
     upload.add_argument("--token")
     upload.set_defaults(func=cmd_upload)
 
-    ui = sub.add_parser("ui", help="operator screens: submit, monitor, review (15장)")
+    ui = _sub("ui", help="operator screens: submit, monitor, review (15장)")
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--port", type=int, default=8765)
     ui.set_defaults(func=cmd_ui)
 
-    transcribe = sub.add_parser("transcribe", help="run STT and write a transcript (20.2)")
+    transcribe = _sub("transcribe", help="run STT and write a transcript (20.2)")
     transcribe.add_argument("source")
     transcribe.add_argument("-o", "--out")
     transcribe.add_argument("--backend", choices=["faster-whisper", "whisperx", "pocketsphinx"], default="faster-whisper",
@@ -1046,7 +1064,7 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--no-diarize", action="store_true")
     transcribe.set_defaults(func=cmd_transcribe)
 
-    dataset = sub.add_parser("dataset", help="build the labelled calibration dataset (17.2)")
+    dataset = _sub("dataset", help="build the labelled calibration dataset (17.2)")
     dataset.add_argument("action", choices=["init", "add-content", "add-silence", "derive-silences", "show"])
     dataset.add_argument("file")
     dataset.add_argument("--source", help="the broadcast this dataset labels")
@@ -1061,17 +1079,17 @@ def build_parser() -> argparse.ArgumentParser:
     dataset.add_argument("--force", action="store_true")
     dataset.set_defaults(func=cmd_dataset)
 
-    benchmark = sub.add_parser("benchmark", help="measure signal extraction on this machine (R3, 20.2)")
+    benchmark = _sub("benchmark", help="measure signal extraction on this machine (R3, 20.2)")
     benchmark.add_argument("source")
     benchmark.add_argument("--frames", action="store_true",
                            help="also time frame sampling and face detection")
     benchmark.set_defaults(func=cmd_benchmark)
 
-    fetch_p = sub.add_parser("fetch-ffmpeg", help="download a static ffmpeg into the workspace")
+    fetch_p = _sub("fetch-ffmpeg", help="download a static ffmpeg into the workspace")
     fetch_p.add_argument("--force", action="store_true", help="fetch even if one is already present")
     fetch_p.set_defaults(func=cmd_fetch_ffmpeg)
 
-    doctor = sub.add_parser("doctor", help="check the prerequisites of 20.2")
+    doctor = _sub("doctor", help="check the prerequisites of 20.2")
     doctor.set_defaults(func=cmd_doctor)
     return parser
 

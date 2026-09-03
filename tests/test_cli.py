@@ -224,3 +224,49 @@ class ReportWarningsAreSpokenTests(unittest.TestCase):
 
     def test_a_clean_run_says_nothing(self):
         self.assertEqual(self._spoken({"episodes": [{"cuts": 3}]}), "")
+
+
+class FlagPlacementTests(unittest.TestCase):
+    """`aicut run film.mkv --producer anthropic` is what people type.
+
+    argparse's answer to a global flag typed after the subcommand is
+    "unrecognized arguments", which reads like the option does not exist - and
+    the fix for that, a shared parent parser, silently breaks the other order
+    unless its defaults are SUPPRESS. Both orders are pinned here because
+    either one failing sends a run to the mock producer without saying so.
+    """
+
+    def setUp(self):
+        from aicut.cli import build_parser
+
+        self.parser = build_parser()
+
+    def test_the_producer_can_be_named_on_either_side_of_the_subcommand(self):
+        before = self.parser.parse_args(["--producer", "anthropic", "run", "x.mkv"])
+        after = self.parser.parse_args(["run", "x.mkv", "--producer", "anthropic"])
+        self.assertEqual(before.producer, "anthropic")
+        self.assertEqual(after.producer, "anthropic",
+                         "a flag typed after the subcommand was dropped")
+
+    def test_the_default_still_holds_when_neither_side_names_it(self):
+        """The subparser must not write its own default over the global one -
+        this is the failure that would run on the mock while saying nothing."""
+        self.assertEqual(self.parser.parse_args(["run", "x.mkv"]).producer, "mock")
+
+    def test_it_holds_for_every_global_flag(self):
+        for flag, value, attribute in (("--workspace", "/w", "workspace"),
+                                       ("--profile", "/p.json", "profile")):
+            with self.subTest(flag=flag):
+                before = self.parser.parse_args([flag, value, "run", "x.mkv"])
+                after = self.parser.parse_args(["run", "x.mkv", flag, value])
+                self.assertEqual(getattr(before, attribute), value)
+                self.assertEqual(getattr(after, attribute), value)
+        self.assertTrue(self.parser.parse_args(["run", "x.mkv", "--strict"]).strict)
+        self.assertFalse(self.parser.parse_args(["run", "x.mkv"]).strict)
+
+    def test_every_subcommand_takes_them_not_only_run(self):
+        for command, extra in (("resume", ["p1"]), ("plan", ["plan.json"]),
+                               ("candidates", ["p1"]), ("doctor", [])):
+            with self.subTest(command=command):
+                parsed = self.parser.parse_args([command] + extra + ["--producer", "anthropic"])
+                self.assertEqual(parsed.producer, "anthropic")

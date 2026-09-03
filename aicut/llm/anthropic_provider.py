@@ -66,6 +66,11 @@ class AnthropicProducer(Producer):
                     messages=[{"role": "user", "content": body}],
                 )
             except Exception as exc:  # transport / rate limit / overload
+                if not self._worth_retrying(exc):
+                    # A bad key or a malformed request fails the same way three
+                    # times. Retrying it wastes the caller's minutes and buries
+                    # the one line that says what to fix.
+                    raise ProviderError(f"task {task!r}: {self._explain(exc)}") from exc
                 last_error = exc
                 if attempt == self.max_retries - 1:
                     break
@@ -75,8 +80,46 @@ class AnthropicProducer(Producer):
                 continue
             text = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")
             self._log_exchange(task, body, text)
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                # The reply was cut mid-JSON. Without this the failure surfaces
+                # as "no parsable JSON", which sends the reader looking at the
+                # prompt instead of at the limit that actually stopped it.
+                raise ProviderError(
+                    f"task {task!r}: the reply hit the {self.max_tokens}-token limit and was cut "
+                    "off mid-answer. Raise max_tokens, or give the task less at once "
+                    "(a shorter broadcast, or fewer candidates per call)."
+                )
             return parse_json_block(text)
         raise ProviderError(f"task {task!r} failed after {self.max_retries} attempts: {last_error}")
+
+    def _worth_retrying(self, exc: Exception) -> bool:
+        """Only failures that a second identical request could survive.
+
+        Overload, rate limits and dropped connections pass; a rejected key or a
+        request the API refused to parse will be rejected again just as fast.
+        """
+        for name in ("AuthenticationError", "PermissionDeniedError", "NotFoundError",
+                     "BadRequestError", "UnprocessableEntityError"):
+            kind = getattr(self._errors, name, None)
+            if kind is not None and isinstance(exc, kind):
+                return False
+        return True
+
+    def _explain(self, exc: Exception) -> str:
+        """Say what to do about it, not only that it happened."""
+        auth = getattr(self._errors, "AuthenticationError", None)
+        denied = getattr(self._errors, "PermissionDeniedError", None)
+        missing = getattr(self._errors, "NotFoundError", None)
+        if auth is not None and isinstance(exc, auth):
+            return f"the API rejected ANTHROPIC_API_KEY ({exc})"
+        if denied is not None and isinstance(exc, denied):
+            return f"this key is not allowed to use {self.model} ({exc})"
+        if missing is not None and isinstance(exc, missing):
+            return (
+                f"no model named {self.model!r}. Pass a model this key can reach, "
+                f"or leave it unset to use {DEFAULT_MODEL}. ({exc})"
+            )
+        return str(exc)
 
     def _log_exchange(self, task: str, request: str, reply: str) -> None:
         if not self.transcript_dir:

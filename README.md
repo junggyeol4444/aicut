@@ -147,6 +147,21 @@ aicut upload --retry                   # 쿼터 초과로 밀린 큐 처리
 `--producer mock`(기본값)은 모델 호출 없이 파이프라인 전체를 돌리는 오프라인
 스텁이다. 판단을 하지 않으며, 모든 판정에 `mock` 딱지가 붙는다.
 
+### 편집기로 넘기기 (22.5)
+
+렌더링 대신 컷을 편집기 타임라인으로 받는다. 마무리는 사람이 한다.
+
+```bash
+# 어느 편집기든 — 교환 파일
+aicut export workspace/<project>/plans/<episode>.json --format fcpxml --format srt
+
+# DaVinci Resolve — 전용 스크립트, plugin/resolve 를 Resolve 스크립트 폴더에 복사
+```
+
+설치·주의사항·검증 상태는 [`plugin/README.md`](plugin/README.md).
+Resolve 스크립트의 산술은 테스트되어 있지만 **Resolve API 호출 자체는
+이 환경에 Resolve가 없어 실행된 적이 없다.** 그 사실은 파일에도 적혀 있다.
+
 ---
 
 ## 파이프라인 (14장)

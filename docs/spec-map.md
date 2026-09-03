@@ -131,5 +131,16 @@
   `TB_CONTENT_CANDIDATE.human_verdict`에 적재한다 (12.3 B 학습 데이터).
 - 검수 API는 검수자 이름 없이는 승인을 거부한다 (11.3 — 누가 공개를 허락했는지 기록).
 - 미측정 파라미터 경고를 모든 화면 상단에 띄운다 (17.5).
-- 전달 방식은 로컬 HTTP 서버 + 정적 페이지다. 20.1이 적은 PyQt6/Electron 래퍼는
-  이 서버를 감싸는 방식으로 나중에 붙일 수 있다.
+- 전달 방식은 로컬 HTTP 서버 + 정적 페이지다. 20.1이 적은 데스크톱 래퍼는
+  `aicut/desktop.py`가 이 서버를 감싸는 방식으로 붙어 있다 — 실행 파일 하나를
+  더블클릭하면 서버가 뜨고 브라우저가 열린다. PyInstaller 스펙은 `aicut.spec`,
+  세 플랫폼에서 실제로 빌드·실행하는 것은 CI의 `desktop` 잡이다.
+
+## 20.1 / 22 — 프로그램과 편집기
+
+| 것 | 어디 | 검증 |
+|---|---|---|
+| 더블클릭 실행 파일 (exe 하나 + 웹 UI 자동 실행) | `aicut/desktop.py`, `aicut.spec` | CI `desktop` 잡이 체크아웃 밖에서 실행 |
+| ffmpeg 자동 다운로드 | `media/ffmpeg_fetch.py`, `aicut fetch-ffmpeg` | 체크섬 미기록 → **거부**. 다운로드 호스트가 이 환경에서 차단되어 실호스트 확인은 안 됨 |
+| 편집기 교환 파일 (EDL/FCPXML/SRT) | `render/exchange.py`, `aicut export` | 실제 영상의 계획으로 생성·검증 |
+| DaVinci Resolve 스크립트 | `plugin/resolve/` | 산술은 `tests/test_plugin_resolve.py`. **API 호출은 미실행** |

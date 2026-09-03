@@ -9,7 +9,8 @@
 | 방법 | 대상 | 설치 | 검증 상태 |
 |---|---|---|---|
 | `aicut export` (교환 파일) | Premiere Pro, Final Cut Pro, Resolve, Avid 등 **전부** | 불필요 | 실제 영상의 계획으로 생성·검증 완료 |
-| `plugin/resolve` (스크립트) | DaVinci Resolve 전용 | 폴더 복사 | 산술은 테스트됨, **Resolve API 호출은 미검증** |
+| `plugin/resolve` (스크립트) | DaVinci Resolve 전용 | 파일 2개 복사 | 산술은 테스트됨, **Resolve API 호출은 미검증** |
+| `plugin/premiere` (스크립트) | Premiere Pro 전용 | 파일 2개 복사 | 산술은 테스트됨, **Premiere API 호출은 미검증** |
 
 ---
 
@@ -115,7 +116,60 @@ python aicut_resolve.py workspace/<project>/plans/<episode>.json
 
 ---
 
-## Premiere Pro
+## 3. Premiere Pro — `plugin/premiere`
 
-전용 플러그인은 없다. `aicut export --format fcpxml` 로 넣으면 컷·순서·원본
-링크가 그대로 들어간다. Premiere용 CEP 확장이 필요하면 말해라 — 추가한다.
+ExtendScript 파일이다. **CEP 확장이 아니다** — ZXP도, 서명 인증서도, 확장 관리자도
+필요 없다. 파일 두 개 복사하면 설치 끝이다.
+
+### 설치
+
+```
+Windows  %APPDATA%\Adobe\Premiere Pro\<버전>\Scripts
+macOS    ~/Documents/Adobe/Premiere Pro/<버전>/Scripts
+```
+
+`aicut_premiere.jsx`와 `aicut_plan.js` 둘 다 복사해야 한다. 판단은 `.js` 쪽에 있다.
+
+### 사용
+
+1. 프로젝트를 열고 **빈 시퀀스를 하나 만든다.** 스크립트는 활성 시퀀스에,
+   그 시퀀스의 프레임 레이트로 넣는다.
+2. `File > Scripts > aicut_premiere`
+3. 편집 계획 `.json` 을 고른다
+
+첫 비디오 트랙에 클립이 이미 있으면 **거부한다.** 남의 편집 위에 조용히
+얹는 것보다 시퀀스 하나 새로 만드는 편이 싸다.
+
+자막은 계획 옆의 `.srt`를 프로젝트로 임포트한다. 캡션 트랙에 얹는 건
+스크립팅 API에 없어서 손으로 끌어야 한다.
+
+### 이 스크립트가 지키는 것
+
+Resolve 쪽과 같다 — 계획 순서(2.4), `remove_spans` 분할(9.3), 한 프레임 미만
+구간 보고. 더해서 Premiere 특유의 두 가지:
+
+* **틱**. Premiere는 초도 프레임도 아닌 틱(초당 254,016,000,000)으로 센다.
+  6시간이면 5.5e15라 double이 1 단위로 못 세는 영역이고, 그래서 Premiere의
+  `Time.ticks`도 문자열이다. 이쪽도 문자열로 낸다.
+* **프레임 그리드 스냅**. 생초로 넣으면 클립마다 한 프레임 미만의 틈이 남고,
+  긴 타임라인 끝에 가면 누구도 못 찾는 어긋남으로 쌓인다.
+
+### 검증 상태
+
+Resolve와 같은 이유로 같은 방식이다. Premiere Pro가 이 환경에 없다.
+
+* `aicut_plan.js` — Premiere를 건드리지 않는다. node로 돌고,
+  `tests/test_plugin_premiere.py`가 그 실제 파일을 node로 실행해서 검사한다
+  (23개). 파이썬으로 다시 구현해서 비교하면 두 복사본이 서로 같다는 것만
+  증명되므로 그렇게 하지 않았다. 하나는 실제 직렬화된 계획을 통과시켜
+  `keptSpans`가 `Cut.kept_spans`와 같은 답을 내는지 대조한다.
+* `aicut_premiere.jsx` — `insertClip`, `setInPoint`, `importFiles` 등 API 호출만.
+  **실행된 적 없다.** Adobe ExtendScript 문서를 보고 썼다.
+
+첫 실행에서 확인할 것 두 가지, 산술에 묻지 않고 상수로 빼놨다:
+
+* `OUT_POINT_IS_EXCLUSIVE` (`aicut_plan.js`). 모든 클립이 한 프레임씩 짧으면 이것 때문이다.
+* 빈 트랙 요구. `insertClip`이 실제로 어떻게 동작하든 남의 클립을 밀지 않는다.
+
+FCPXML 경로(`aicut export --format fcpxml`)는 Premiere에서도 되고 그쪽은 검증됐다.
+스크립트가 안 맞으면 그걸 쓰면 된다.

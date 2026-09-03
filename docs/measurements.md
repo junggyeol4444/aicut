@@ -244,15 +244,35 @@ GPU가 필요한 건 **WhisperX이고 STT 전체가 아니다** — 그걸 한�
 
 ## 플랫폼 — 실제 실행 결과
 
-CI 6잡 전부 통과 (커밋 `7eb2ae2`):
+CI 9잡 전부 통과 (커밋 `c176407`):
 
 | 잡 | 환경 | 결과 |
 |---|---|---|
-| offline 3.10 / 3.13 | ffmpeg를 PATH에서 치움 | 314개 중 51개 건너뜀, 나머지 통과 |
-| with ffmpeg and OpenCV | ubuntu, ffmpeg 7.1 | 314개 통과 |
-| windows-latest | choco ffmpeg 9.0.1 | 314개 통과 |
-| macos-latest | brew ffmpeg-full 8.x | 314개 통과 |
+| offline 3.10 / 3.13 | ffmpeg를 PATH에서 치움 | 건너뛴 것 외 전부 통과 |
+| with ffmpeg and OpenCV | ubuntu, ffmpeg 7.1 | 통과 |
+| windows-latest | choco ffmpeg 9.0.1 | 통과 |
+| macos-latest | brew ffmpeg-full 8.x | 통과 |
 | build and install | wheel을 저장소 밖에서 실행 | 통과 |
+| desktop build ×3 | ubuntu / windows / macos, PyInstaller 실행 파일을 저장소 밖에서 실행 | 통과 |
+
+**그 전 3커밋 동안 windows 잡은 빨간색이었고 나는 초록이라고 보고했다.**
+확인하지 않고 말한 것이다. 원인은 flake가 아니라 실제 버그였다:
+
+```
+AssertionError: 'stream%20one.mkv' not found in '/broadcasts/stream one.mkv'
+```
+
+FCPXML의 `media-rep src`를 `Path.as_uri()`로 만들고 있었는데, 그 함수의
+"절대경로" 판정은 실행 중인 플랫폼 기준이다. Linux에서 만든 계획이 들고 있는
+`/broadcasts/x.mkv`를 Windows는 상대경로로 읽고, `as_posix()`로 떨어져 공백이
+든 생경로를 뱉었다. 임포터는 그 경로로 relink를 못 하거나 이름을 공백에서
+자른다. FCPXML을 EDL 대신 쓰는 이유가 원본 경로를 들고 가는 것이므로,
+그 하나가 형식 전체의 존재 이유를 무효로 만든다.
+
+`Path(...).name`도 같은 성질이다. Windows 경로를 다른 OS에서 열면 `C:\Users\...`
+전체가 파일 "이름"이 되고, 그게 타임라인 클립 라벨과 EDL 릴 이름으로 들어간다.
+
+교훈은 코드가 아니라 보고 쪽이다. **CI 결과는 확인한 뒤에만 말한다.**
 
 ## 배포 형태
 

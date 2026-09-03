@@ -155,12 +155,14 @@ aicut upload --retry                   # 쿼터 초과로 밀린 큐 처리
 # 어느 편집기든 — 교환 파일
 aicut export workspace/<project>/plans/<episode>.json --format fcpxml --format srt
 
-# DaVinci Resolve — 전용 스크립트, plugin/resolve 를 Resolve 스크립트 폴더에 복사
+# DaVinci Resolve / Premiere Pro — 전용 스크립트
+#   plugin/resolve  또는  plugin/premiere 의 파일 2개를 편집기 스크립트 폴더에 복사
 ```
 
 설치·주의사항·검증 상태는 [`plugin/README.md`](plugin/README.md).
-Resolve 스크립트의 산술은 테스트되어 있지만 **Resolve API 호출 자체는
-이 환경에 Resolve가 없어 실행된 적이 없다.** 그 사실은 파일에도 적혀 있다.
+두 스크립트 모두 **판단 부분은 테스트되어 있고, 편집기 API 호출 자체는
+이 환경에 Resolve도 Premiere도 없어 실행된 적이 없다.** 그 사실은 파일에도 적혀 있다.
+교환 파일 경로는 실제 영상으로 검증됐다.
 
 ---
 

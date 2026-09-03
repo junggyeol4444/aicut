@@ -144,3 +144,4 @@
 | ffmpeg 자동 다운로드 | `media/ffmpeg_fetch.py`, `aicut fetch-ffmpeg` | 체크섬 미기록 → **거부**. 다운로드 호스트가 이 환경에서 차단되어 실호스트 확인은 안 됨 |
 | 편집기 교환 파일 (EDL/FCPXML/SRT) | `render/exchange.py`, `aicut export` | 실제 영상의 계획으로 생성·검증 |
 | DaVinci Resolve 스크립트 | `plugin/resolve/` | 산술은 `tests/test_plugin_resolve.py`. **API 호출은 미실행** |
+| Premiere Pro 스크립트 | `plugin/premiere/` | 산술은 `tests/test_plugin_premiere.py`가 node로 실행. **API 호출은 미실행** |

@@ -172,3 +172,126 @@ class SceneLengthTests(unittest.TestCase):
         ]
         index = SceneIndex.build(utterances, [], profile=profile)
         self.assertEqual(len(index.scenes), 2, "the pause no longer splits a scene")
+
+
+class SceneLengthRelativeToSourceTests(unittest.TestCase):
+    """A scene may not be the broadcast, whatever the broadcast's length.
+
+    The seconds cap alone missed this: on a real 30 second film the 90 second
+    cap allowed a single scene covering all of it, and the plan came out as six
+    cuts of 0.00-30.00 - every beat retrieving the entire source. Same failure
+    as the six-hour case, too small for an absolute number to catch.
+    """
+
+    def _continuous(self, duration, step=1.2, spoken=1.0):
+        out, t = [], 0.0
+        while t + spoken < duration:
+            out.append(Utterance(start_sec=t, end_sec=t + spoken,
+                                 text="the bunny again", speaker="HOST"))
+            t += step
+        return out
+
+    def test_a_thirty_second_source_is_not_one_scene(self):
+        profile = CalibrationProfile.load()
+        utterances = self._continuous(30.0)
+        index = SceneIndex.build(utterances, [], profile=profile, source_sec=30.0)
+        longest = max(s.end_sec - s.start_sec for s in index.scenes)
+        self.assertLess(longest, 30.0, "one scene covered the whole source")
+        self.assertGreater(len(index.scenes), 2,
+                           "retrieval needs something to choose between")
+
+    def test_the_ratio_is_a_profile_value(self):
+        """17.1: not a constant in the code."""
+        utterances = self._continuous(30.0)
+        tight = CalibrationProfile.load().with_overrides(
+            {"retrieval.scene_max_source_ratio": 0.1}, measured=[])
+        loose = CalibrationProfile.load().with_overrides(
+            {"retrieval.scene_max_source_ratio": 0.5}, measured=[])
+        self.assertGreater(
+            len(SceneIndex.build(utterances, [], profile=tight, source_sec=30.0).scenes),
+            len(SceneIndex.build(utterances, [], profile=loose, source_sec=30.0).scenes),
+        )
+
+    def test_the_seconds_cap_still_binds_on_a_long_source(self):
+        """Both bounds apply; on six hours the ratio is the loose one."""
+        profile = CalibrationProfile.load()
+        cap = profile.get_float("retrieval.scene_max_sec")
+        utterances = self._continuous(2000.0, step=4.3, spoken=3.5)
+        index = SceneIndex.build(utterances, [], profile=profile, source_sec=21600.0)
+        self.assertLessEqual(max(s.end_sec - s.start_sec for s in index.scenes), cap + 10)
+
+
+class MentionSceneCapTests(unittest.TestCase):
+    """The cap has to hold on every path that makes a scene.
+
+    Scenes built from speech were capped; scenes built from a mention with no
+    speech under it were not. On a real film that branch put a 15.9 second
+    scene into the plan while the cap said 6, so the cut it produced covered
+    half the source - every cap in place and the failure still shipped.
+    """
+
+    def test_a_mention_with_no_speech_under_it_is_split_to_the_cap(self):
+        profile = CalibrationProfile.load()
+        event = Event(summary="a long silent stretch")
+        event.mentions = [EventMention(event.event_id, 0.0, 60.0, "result", "no words here")]
+
+        index = SceneIndex.build([], [event], profile=profile, source_sec=300.0)
+        cap = min(profile.get_float("retrieval.scene_max_sec"),
+                  300.0 * profile.get_float("retrieval.scene_max_source_ratio"))
+        self.assertTrue(index.scenes, "the mention became nothing at all")
+        longest = max(s.end_sec - s.start_sec for s in index.scenes)
+        self.assertLessEqual(longest, cap + 0.01,
+                             f"a mention-built scene ran {longest:.1f}s past a {cap:.1f}s cap")
+
+    def test_the_whole_mention_is_still_covered(self):
+        """Split, not truncated: 16장 keeps working through silence."""
+        event = Event(summary="silence")
+        event.mentions = [EventMention(event.event_id, 10.0, 70.0, "result", "quiet")]
+        index = SceneIndex.build([], [event], profile=CalibrationProfile.load(), source_sec=300.0)
+        spans = sorted((s.start_sec, s.end_sec) for s in index.scenes)
+        self.assertAlmostEqual(spans[0][0], 10.0)
+        self.assertAlmostEqual(spans[-1][1], 70.0)
+        for (_, end), (start, _) in zip(spans, spans[1:]):
+            self.assertAlmostEqual(end, start, msg="a gap opened between the pieces")
+
+
+class LongUtteranceSplitTests(unittest.TestCase):
+    """The cap has to hold inside an utterance too.
+
+    Scenes split between utterances, so an utterance longer than the cap went
+    through whole. A recogniser running over music merges its guesses into one
+    long span, and on a real 30 second film that produced a single 14.9s
+    utterance against a 6s cap - the third place this same failure hid, after
+    no cap at all and an absolute-only cap.
+    """
+
+    def _profile(self, cap):
+        return CalibrationProfile.load().with_overrides(
+            {"retrieval.scene_max_sec": cap,
+             "retrieval.scene_max_source_ratio": 1.0}, measured=[])
+
+    def test_one_long_utterance_becomes_several_scenes(self):
+        words = [{"word": f"w{i}", "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(40)]
+        utterance = Utterance(start_sec=0.0, end_sec=20.0, text=" ".join(w["word"] for w in words),
+                              speaker="HOST", words=words)
+        index = SceneIndex.build([utterance], [], profile=self._profile(6.0), source_sec=300.0)
+        self.assertGreater(len(index.scenes), 1, "a 20s utterance stayed one scene under a 6s cap")
+        self.assertLessEqual(max(s.end_sec - s.start_sec for s in index.scenes), 6.5)
+
+    def test_the_pieces_carry_the_words_that_were_said_in_them(self):
+        words = [{"word": f"w{i}", "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(40)]
+        utterance = Utterance(start_sec=0.0, end_sec=20.0, text=" ".join(w["word"] for w in words),
+                              speaker="HOST", words=words)
+        scenes = sorted(SceneIndex.build([utterance], [], profile=self._profile(6.0),
+                                         source_sec=300.0).scenes, key=lambda s: s.start_sec)
+        self.assertIn("w0", scenes[0].text)
+        self.assertNotIn("w0", scenes[-1].text, "a later piece claimed words from the start")
+        self.assertTrue(scenes[-1].text.strip(), "the last piece lost its text")
+
+    def test_an_utterance_with_no_word_timings_is_still_split(self):
+        """No seams to cut on, so the text stays with the first piece rather
+        than being invented into parts nobody said."""
+        utterance = Utterance(start_sec=0.0, end_sec=20.0, text="one long stretch", speaker="HOST")
+        scenes = SceneIndex.build([utterance], [], profile=self._profile(6.0), source_sec=300.0).scenes
+        self.assertGreater(len(scenes), 1)
+        self.assertLessEqual(max(s.end_sec - s.start_sec for s in scenes), 6.5)

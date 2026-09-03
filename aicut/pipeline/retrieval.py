@@ -25,6 +25,48 @@ from aicut.models import DetailSpan, Event, UNKNOWN_SPEAKER, Utterance
 _WORD = re.compile(r"[\w']+", re.UNICODE)
 
 
+def _split_long(utterances, max_scene_sec: float):
+    """Yield (start, end, text) no longer than the cap, splitting on words.
+
+    An utterance can outrun the cap by itself - a recogniser running over music
+    merges its guesses into one long span - and a scene that long is what
+    retrieval cannot pick a moment out of. Word timings give the seams; without
+    them the text goes with the first piece rather than being invented into
+    parts nobody said.
+    """
+    if not utterances:
+        return
+    start = utterances[0].start_sec
+    end = utterances[-1].end_sec
+    text = " ".join(u.text for u in utterances)
+    if end - start <= max_scene_sec:
+        yield start, end, text
+        return
+
+    words = [w for u in utterances for w in (u.words or []) if w.get("start") is not None]
+    if not words:
+        at = start
+        while at < end:
+            piece_end = min(end, at + max_scene_sec)
+            yield at, piece_end, text if at == start else ""
+            at = piece_end
+        return
+
+    words.sort(key=lambda w: float(w["start"]))
+    piece: list = []
+    piece_start = start
+    for word in words:
+        if piece and float(word["end"] if word.get("end") is not None else word["start"]) - piece_start > max_scene_sec:
+            yield piece_start, float(piece[-1].get("end") or piece[-1]["start"]), " ".join(
+                str(w.get("word", "")).strip() for w in piece
+            ).strip()
+            piece = []
+            piece_start = float(word["start"])
+        piece.append(word)
+    if piece:
+        yield piece_start, end, " ".join(str(w.get("word", "")).strip() for w in piece).strip()
+
+
 def tokenize(text: str) -> list[str]:
     return [t.lower() for t in _WORD.findall(text or "")]
 
@@ -77,6 +119,7 @@ class SceneIndex:
         profile: CalibrationProfile | None = None,
         max_gap_sec: float | None = None,
         max_scene_sec: float | None = None,
+        source_sec: float | None = None,
     ) -> "SceneIndex":
         """Group speech into scenes, then tag each with the events it overlaps.
 
@@ -89,6 +132,12 @@ class SceneIndex:
         beat then retrieved the entire recording, so a plan came out with 179
         cuts covering 44 days of source and 828,949 subtitle lines. Retrieval
         cannot pick a moment out of a unit that is the whole thing.
+
+        A cap in seconds alone does not say that. On a 30 second film the 90
+        second cap allowed one scene covering all of it, and the plan came out
+        as six cuts of 0.00-30.00 - the same failure, too small to be caught by
+        an absolute number. What has to hold is relative: a scene may not be
+        the broadcast. Both bounds apply, whichever is tighter.
         """
         if profile is not None:
             if max_gap_sec is None:
@@ -99,6 +148,9 @@ class SceneIndex:
             max_gap_sec = 2.0
         if max_scene_sec is None:
             max_scene_sec = 90.0
+        ratio = profile.get_float("retrieval.scene_max_source_ratio") if profile else 0.2
+        if source_sec and ratio > 0:
+            max_scene_sec = min(max_scene_sec, source_sec * ratio)
         scenes: list[Scene] = []
         current: list[Utterance] = []
 
@@ -106,14 +158,26 @@ class SceneIndex:
             if not current:
                 return
             speakers = {u.speaker for u in current}
-            text = " ".join(u.text for u in current)
-            scenes.append(Scene(
-                start_sec=current[0].start_sec,
-                end_sec=current[-1].end_sec,
-                text=text,
-                speaker=next(iter(speakers)) if len(speakers) == 1 else UNKNOWN_SPEAKER,
-                tokens=tokenize(text),
-            ))
+            speaker = next(iter(speakers)) if len(speakers) == 1 else UNKNOWN_SPEAKER
+
+            # The gap check only ever fires between utterances, so a single
+            # utterance longer than the cap slipped through whole: on a real
+            # film one ran 14.9s against a 6s cap, and the cut built from it
+            # covered half the source. Cut long spans at word boundaries.
+            pieces: list[list] = [[]]
+            span_start = current[0].start_sec
+            for utterance in current:
+                if pieces[0] and utterance.end_sec - span_start > max_scene_sec:
+                    pieces.append([])
+                    span_start = utterance.start_sec
+                pieces[-1].append(utterance)
+
+            for piece in pieces:
+                for start, end, text in _split_long(piece, max_scene_sec):
+                    scenes.append(Scene(
+                        start_sec=start, end_sec=end, text=text,
+                        speaker=speaker, tokens=tokenize(text),
+                    ))
             current.clear()
 
         for utterance in sorted(utterances, key=lambda u: u.start_sec):
@@ -135,15 +199,23 @@ class SceneIndex:
                 if not overlapping:
                     # A mention with no speech under it is still retrievable -
                     # 16장 requires the system to keep working through silence.
-                    scene = Scene(
-                        start_sec=mention.source_start_sec,
-                        end_sec=mention.source_end_sec,
-                        text=mention.quote,
-                        event_ids=[event.event_id],
-                        roles=[mention.role],
-                        tokens=tokenize(f"{mention.quote} {event.summary} {mention.role}"),
-                    )
-                    scenes.append(scene)
+                    #
+                    # Split to the same cap as speech scenes. These bypassed it
+                    # entirely, so on a real film every cap was in place and a
+                    # 15.9s scene still reached the plan through this branch,
+                    # while the cap said 6s. A hole in one path is a hole.
+                    at = mention.source_start_sec
+                    while at < mention.source_end_sec:
+                        piece_end = min(mention.source_end_sec, at + max_scene_sec)
+                        scenes.append(Scene(
+                            start_sec=at,
+                            end_sec=piece_end,
+                            text=mention.quote,
+                            event_ids=[event.event_id],
+                            roles=[mention.role],
+                            tokens=tokenize(f"{mention.quote} {event.summary} {mention.role}"),
+                        ))
+                        at = piece_end
                     continue
                 for scene in overlapping:
                     if event.event_id not in scene.event_ids:

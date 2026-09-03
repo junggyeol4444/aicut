@@ -99,6 +99,7 @@
     "candidates_per_query": 8,
     "scene_gap_sec": 2.0,
     "scene_max_sec": 90.0,
+    "scene_max_source_ratio": 0.2,
     "min_query_score": 0.2,
     "cut_padding_head_sec": 0.4,
     "cut_padding_tail_sec": 0.6

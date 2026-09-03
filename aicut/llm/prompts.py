@@ -86,6 +86,10 @@ Return: {"structure_name": str, "rationale": str, "target_type": str,
 """,
     "select_scene": """\
 Pick which retrieved scene actually serves this beat, or reject them all (8.1).
+`already_used` lists the spans earlier beats took. Reusing one is allowed - 2.4
+lets a video return to a moment - but the viewer will see that shot twice, so
+reuse it only when this beat genuinely needs that moment and not merely because
+it scored highest again.
 Return: {"chosen_index": int|null, "start_sec": number, "end_sec": number,
 "reason": str, "speaker": str, "subtitle_emphasis": bool}
 Set chosen_index to null when none of them does the job.

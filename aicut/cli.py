@@ -104,6 +104,8 @@ def _print_report_warnings(report: dict) -> None:
         print(f"\n  DEGRADED: {entry['detail']}")
     for entry in report.get("subtitles_dropped", []):
         print(f"\n  SUBTITLES: {entry['detail']}")
+    for entry in report.get("repeated_spans", []):
+        print(f"\n  REPEATED SHOT: {entry['detail']}")
     for entry in report.get("render_failures", []):
         print(f"\n  RENDER FAILED for {entry['episode_id']}: {entry['error']}")
         print(f"      {entry['note']}")

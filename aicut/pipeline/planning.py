@@ -51,7 +51,7 @@ def run(
     utterances = ctx.store.utterances(ctx.project.project_id)
     index = SceneIndex.build(
         utterances, list(events.values()), ctx.store.details(ctx.project.project_id),
-        profile=ctx.profile,
+        profile=ctx.profile, source_sec=ctx.project.duration_sec,
     )
 
     episodes: list[Episode] = []
@@ -150,6 +150,16 @@ def _lay_out_cuts(ctx: RunContext, structure: dict, index: SceneIndex) -> list[C
 
         chosen = ctx.producer.select_scene({
             "beat": beat,
+            # What earlier beats already took. 2.4 lets an episode revisit a
+            # moment, so this is not a ban - but the decision cannot be made by
+            # something that does not know. Without it, three consecutive beats
+            # took the identical 5.82-21.72 span on a real film, because each
+            # was handed the same top-scoring scene and had no way to tell.
+            "already_used": [
+                {"start_sec": c.source_start_sec, "end_sec": c.source_end_sec,
+                 "role": c.scene_role}
+                for c in cuts
+            ],
             "candidates": [
                 {
                     "index": i,
@@ -170,6 +180,24 @@ def _lay_out_cuts(ctx: RunContext, structure: dict, index: SceneIndex) -> list[C
             continue
 
         scene = results[int(picked)].scene
+        repeat = next(
+            (c for c in cuts
+             if abs(c.source_start_sec - max(0.0, float(chosen.get("start_sec", scene.start_sec)) - head_pad)) < 0.01
+             and abs(c.source_end_sec - min(duration, float(chosen.get("end_sec", scene.end_sec)) + tail_pad)) < 0.01),
+            None,
+        )
+        if repeat is not None:
+            # Allowed (2.4) but worth saying: a viewer sees the same shot twice.
+            ctx.report.setdefault("repeated_spans", []).append({
+                "start_sec": round(repeat.source_start_sec, 2),
+                "end_sec": round(repeat.source_end_sec, 2),
+                "roles": [repeat.scene_role, beat.get("role", "")],
+                "detail": (
+                    f"the span {repeat.source_start_sec:.1f}-{repeat.source_end_sec:.1f}s is used "
+                    f"by more than one beat ({repeat.scene_role} and {beat.get('role','?')}); "
+                    "2.4 allows revisiting a moment, but the same shot will appear twice"
+                ),
+            })
         start = float(chosen.get("start_sec", scene.start_sec)) - head_pad
         end = float(chosen.get("end_sec", scene.end_sec)) + tail_pad
         start = max(0.0, start)

@@ -211,14 +211,25 @@ class MockProducer(Producer):
         cands = payload.get("candidates", [])
         if not cands:
             return {"chosen_index": None, "reason": "mock: retrieval returned nothing"}
-        best = cands[0]
+        used = payload.get("already_used", [])
+
+        def overlaps(c):
+            return any(u["end_sec"] > c["start_sec"] and u["start_sec"] < c["end_sec"] for u in used)
+
+        # Highest scoring scene that no earlier beat took; falls back to the
+        # best overall when every candidate is already spoken for. Without this
+        # every beat got the same top scene and the episode repeated one shot.
+        best = next((c for c in cands if not overlaps(c)), cands[0])
         return {
-            "chosen_index": 0,
+            # best["index"], not 0: the two agreed only while this always
+            # picked the first candidate, and the caller reads the scene by
+            # index while taking the times from this reply.
+            "chosen_index": best["index"],
             "start_sec": best["start_sec"],
             "end_sec": best["end_sec"],
             "speaker": best.get("speaker", "UNKNOWN"),
             "subtitle_emphasis": False,
-            "reason": "mock: highest retrieval score",
+            "reason": "mock: highest retrieval score not already used by an earlier beat",
         }
 
     def _task_judge_pacing(self, payload: dict[str, Any]) -> dict[str, Any]:

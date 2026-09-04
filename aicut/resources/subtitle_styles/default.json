@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "name": "default",
+    "status": "initial profile, update target (10.3)",
+    "notes": "Font/size/colour are NOT system constants. 4.5's subtitle-pattern analysis updates this file; a fixed house style would contradict the dynamic-trend principle. Only fonts whose licence permits embedding and commercial use may be listed here (SIL OFL and similar).",
+    "font_licence": "SIL Open Font License 1.1"
+  },
+  "play_res_x": 1920,
+  "play_res_y": 1080,
+  "styles": {
+    "default": {
+      "fontname": "Noto Sans KR",
+      "fontsize": 54,
+      "primary_colour": "&H00FFFFFF",
+      "secondary_colour": "&H000000FF",
+      "outline_colour": "&H00101010",
+      "back_colour": "&H80000000",
+      "bold": -1,
+      "italic": 0,
+      "underline": 0,
+      "strike_out": 0,
+      "scale_x": 100,
+      "scale_y": 100,
+      "spacing": 0,
+      "angle": 0,
+      "border_style": 1,
+      "outline": 3,
+      "shadow": 1,
+      "alignment": 2,
+      "margin_l": 60,
+      "margin_r": 60,
+      "margin_v": 70,
+      "encoding": 1
+    },
+    "emphasis": {
+      "inherits": "default",
+      "fontsize": 66,
+      "primary_colour": "&H0000E5FF",
+      "outline": 4
+    },
+    "speaker_b": {
+      "inherits": "default",
+      "primary_colour": "&H00C8FFC8"
+    }
+  },
+  "effects": {
+    "fade_in_ms": 60,
+    "fade_out_ms": 60,
+    "emphasis_transform": "\\fscx105\\fscy105"
+  }
+}

@@ -1,0 +1,165 @@
+{
+  "_meta": {
+    "name": "default",
+    "measured_at": null,
+    "notes": "Starting point only. Every value listed under 'provisional' is an unmeasured guess kept solely so the pipeline can run before 17.4 has been executed. Run `aicut calibrate sweep` against a real source/output dataset and save a channel profile before trusting any output.",
+    "eval_score": {},
+    "provisional": [
+      "boundary_hints",
+      "discovery",
+      "laughter",
+      "pacing",
+      "retrieval",
+      "scan.pass1_frame_interval_sec",
+      "scan.pass1_window_sec",
+      "scan.pass2_trigger",
+      "silence",
+      "situation",
+      "subtitle",
+      "tension",
+      "thumbnail",
+      "topic_shift"
+    ]
+  },
+  "scan": {
+    "pass1_window_sec": 120,
+    "pass1_frame_interval_sec": 5,
+    "pass2_frame_interval_sec": 0.5,
+    "pass2_trigger": {
+      "min_tension_peak": 0.55,
+      "min_marker_count": 1,
+      "always_include_roles": [
+        "result",
+        "conflict",
+        "first_mention"
+      ]
+    },
+    "long_source_split_sec": 36000,
+    "long_source_chunk_sec": 7200
+  },
+  "silence": {
+    "level_db": -35.0,
+    "min_duration_sec": 0.35,
+    "merge_gap_sec": 0.15
+  },
+  "tension": {
+    "weights": {
+      "rms": 0.4,
+      "peak": 0.2,
+      "speech_rate": 0.2,
+      "laughter": 0.2
+    },
+    "smoothing_window_sec": 3.0,
+    "high": 0.62,
+    "low": 0.25
+  },
+  "situation": {
+    "min_segment_sec": 45,
+    "face_ratio_solo_talk": 0.12,
+    "multi_person_min_speakers": 2,
+    "away_max_motion": 0.04
+  },
+  "topic_shift": {
+    "similarity_drop": 0.35,
+    "window_utterances": 8
+  },
+  "boundary_hints": {
+    "situation_hold_sec": 300,
+    "tension_floor_hold_sec": 240,
+    "min_hint_count": 2
+  },
+  "pacing": {
+    "preroll_tension_window_sec": 4.0,
+    "speaker_switch_grace_sec": 1.2,
+    "keep_max_sec": 3.5,
+    "trim_target_sec": 0.45,
+    "cut_min_sec": 2.5,
+    "still_frame_motion_max": 0.03,
+    "role_keep_bias": {
+      "core": 0.2,
+      "result": 0.15,
+      "background": -0.1
+    },
+    "keep_score_threshold": 0.5,
+    "keep_signal_weights": {
+      "high_tension_preroll": 0.4,
+      "speaker_handover": 0.5,
+      "frozen_after_peak": 0.2,
+      "over_keep_max": -0.3,
+      "long_and_low": -0.3
+    }
+  },
+  "discovery": {
+    "min_independence_score": 0.55,
+    "min_event_mentions": 2,
+    "max_required_context_sec": 90,
+    "min_density_score": 0.4
+  },
+  "retrieval": {
+    "candidates_per_query": 8,
+    "scene_gap_sec": 2.0,
+    "scene_max_sec": 90.0,
+    "scene_max_source_ratio": 0.2,
+    "min_query_score": 0.2,
+    "cut_padding_head_sec": 0.4,
+    "cut_padding_tail_sec": 0.6
+  },
+  "thumbnail": {
+    "candidate_count": 6,
+    "weights": {
+      "audio_tension": 0.4,
+      "expression_change": 0.4,
+      "screen_event": 0.2
+    },
+    "min_gap_sec": 5.0
+  },
+  "subtitle": {
+    "min_word_confidence": 0.35,
+    "min_kept_word_ratio": 0.5
+  },
+  "render": {
+    "video": {
+      "codec": "libx264",
+      "preset": "medium",
+      "crf": 18,
+      "pix_fmt": "yuv420p",
+      "default_height": 1080,
+      "shorts_resolution": [
+        1080,
+        1920
+      ],
+      "fps": null
+    },
+    "audio": {
+      "codec": "aac",
+      "bitrate": "192k",
+      "sample_rate": 48000,
+      "cut_fade_ms": 8,
+      "loudness": {
+        "integrated_lufs": -14.0,
+        "true_peak_dbtp": -1.0,
+        "loudness_range": 11.0,
+        "two_pass": true
+      }
+    },
+    "zoom": {
+      "strategy": "segment_crop",
+      "default_scale": 0.83,
+      "max_scale_step": 0.05
+    },
+    "subtitle_style_profile": "default"
+  },
+  "upload": {
+    "privacy_on_upload": "private",
+    "require_human_review": true,
+    "daily_quota_units": 10000,
+    "quota_reset_timezone": "America/Los_Angeles"
+  },
+  "laughter": {
+    "detector": "loud_non_speech",
+    "loud_percentile": 0.92,
+    "min_duration_sec": 0.8,
+    "max_word_density": 0.7,
+    "merge_gap_sec": 0.5
+  }
+}

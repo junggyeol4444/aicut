@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aicut</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2c313b; --ink: #e6e9ef;
+    --dim: #969db0; --accent: #6ea8fe; --ok: #5fd08a; --warn: #e5c07b; --bad: #e06c75;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.55 ui-sans-serif, "Pretendard", "Noto Sans KR", system-ui, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex;
+           align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
+  .muted { color: var(--dim); font-size: 12px; }
+  nav { display: flex; gap: 4px; padding: 10px 20px 0; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--dim);
+               padding: 8px 14px; cursor: pointer; font: inherit; }
+  nav button.on { color: var(--ink); border-bottom-color: var(--accent); }
+  main { padding: 20px; max-width: 1100px; }
+  section { display: none; } section.on { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 14px 16px; margin-bottom: 12px; }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 4px; }
+  input, select, textarea { width: 100%; background: #12141a; color: var(--ink);
+          border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; }
+  button.go { background: var(--accent); color: #10131a; border: 0; border-radius: 6px;
+              padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; margin-top: 14px; }
+  button.small { background: none; border: 1px solid var(--line); color: var(--ink);
+                 border-radius: 5px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  button.small:hover { border-color: var(--accent); }
+  pre { background: #101318; border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+        overflow: auto; max-height: 380px; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .grow { flex: 1; min-width: 200px; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .produce { color: var(--ok); border-color: var(--ok); }
+  .reject { color: var(--bad); border-color: var(--bad); }
+  .combine, .hold { color: var(--warn); border-color: var(--warn); }
+  .banner { border-left: 3px solid var(--warn); background: #221f16; padding: 10px 14px;
+            border-radius: 4px; margin-bottom: 14px; font-size: 13px; }
+  .log { font-size: 11.5px; max-height: 300px; }
+  .log .error { color: var(--bad); } .log .warn { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>aicut</h1>
+  <span class="muted" id="profile-line">…</span>
+</header>
+<nav>
+  <button data-tab="input" class="on">1. 입력</button>
+  <button data-tab="monitor">2. 진행</button>
+  <button data-tab="candidates">3. 콘텐츠 후보</button>
+  <button data-tab="results">4. 결과</button>
+</nav>
+<main>
+  <div id="provisional-banner"></div>
+
+  <!-- 15.2 -->
+  <section id="input" class="on">
+    <div class="card">
+      <label>원본 파일 경로 (.mp4 / .mkv)</label>
+      <input id="source" placeholder="/media/stream_2026-08-19.mkv">
+      <label>기존 트랜스크립트 (선택, WhisperX JSON) — 없으면 저장된 발화를 쓴다</label>
+      <input id="transcript" placeholder="/media/stream.transcript.json">
+      <div class="row">
+        <div class="grow">
+          <label>목표 길이 힌트 (초) — 강제가 아니다 (2.6)</label>
+          <input id="hint" type="number" placeholder="600">
+        </div>
+        <div class="grow">
+          <label>채널</label>
+          <input id="channel" placeholder="mychannel">
+        </div>
+        <div class="grow">
+          <label>어디까지</label>
+          <select id="mode">
+            <option value="plan">편집 계획까지 (MVP 5)</option>
+            <option value="render">렌더링까지 (MVP 6)</option>
+          </select>
+        </div>
+      </div>
+      <button class="go" id="submit">분석 시작</button>
+      <div class="muted" id="submit-msg" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <div class="muted">프로젝트</div>
+      <table id="projects"><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- 15.3 -->
+  <section id="monitor">
+    <div class="card">
+      <div class="row">
+        <div class="grow"><b id="job-state">—</b> <span class="muted" id="job-source"></span></div>
+        <span class="muted" id="job-elapsed"></span>
+      </div>
+      <pre class="log" id="job-log"></pre>
+    </div>
+    <div class="card" id="job-report-card" style="display:none">
+      <div class="muted">작업 리포트 (22.6)</div>
+      <pre id="job-report"></pre>
+    </div>
+  </section>
+
+  <!-- 15.4 -->
+  <section id="candidates">
+    <div class="card">
+      <div class="row">
+        <select id="cand-project" class="grow"></select>
+        <button class="small" id="cand-load">불러오기</button>
+      </div>
+      <div class="muted" id="agreement" style="margin-top:10px"></div>
+    </div>
+    <div id="cand-list"></div>
+  </section>
+
+  <!-- 15.5 -->
+  <section id="results">
+    <div class="card">
+      <div class="row">
+        <select id="ep-project" class="grow"></select>
+        <button class="small" id="ep-load">불러오기</button>
+        <input id="reviewer" placeholder="검수자 이름" style="max-width:180px">
+      </div>
+    </div>
+    <div id="ep-list"></div>
+    <div class="card" id="plan-card" style="display:none">
+      <div class="muted">편집 계획 — 이것만 읽고 결과물을 예상할 수 있어야 한다 (MVP 5)</div>
+      <pre id="plan-body"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+const api = async (path, options) => {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({ error: "응답이 JSON이 아니다" }));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+};
+const post = (path, body) => api(path, {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+});
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hms = (sec) => {
+  const s = Math.max(0, Math.round(sec || 0));
+  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((n) => String(n).padStart(2, "0")).join(":");
+};
+
+let currentJob = null;
+
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll("main section").forEach((s) => s.classList.toggle("on", s.id === b.dataset.tab));
+  if (b.dataset.tab === "candidates" || b.dataset.tab === "results") loadProjects();
+});
+
+async function loadProfile() {
+  const p = await api("/api/profile");
+  el("profile-line").textContent = `profile ${p.name} · producer ${p.producer}`
+    + (p.measured_at ? ` · measured ${p.measured_at}` : " · 미측정");
+  if (p.warning) {
+    el("provisional-banner").innerHTML = `<div class="banner"><b>미측정 파라미터 사용 중 (17.5)</b><br>`
+      + `${esc(p.provisional.join(", "))}<br>`
+      + `<span class="muted">이 값들은 추측이다. 17.4 스윕을 돌리기 전까지 결과를 신뢰하지 말 것.</span></div>`;
+  }
+}
+
+async function loadProjects() {
+  const rows = await api("/api/projects");
+  el("projects").querySelector("tbody").innerHTML = rows.length ? rows.map((r) => `
+    <tr><td><code>${esc(r.project_id.slice(0, 8))}</code></td>
+    <td>${esc(r.file_path)}</td><td>${esc(r.status)}</td>
+    <td class="muted">${r.episodes} 편</td></tr>`).join("")
+    : `<tr><td class="muted">아직 없다</td></tr>`;
+  for (const id of ["cand-project", "ep-project"]) {
+    const sel = el(id), keep = sel.value;
+    sel.innerHTML = rows.map((r) =>
+      `<option value="${esc(r.project_id)}">${esc(r.file_path)} — ${esc(r.status)}</option>`).join("");
+    if (keep) sel.value = keep;
+  }
+}
+
+el("submit").onclick = async () => {
+  el("submit-msg").textContent = "…";
+  try {
+    const res = await post("/api/projects", {
+      source: el("source").value,
+      transcript: el("transcript").value || null,
+      length_hint_sec: el("hint").value || null,
+      channel_ref: el("channel").value,
+      render: el("mode").value === "render",
+    });
+    currentJob = res.job_id;
+    el("submit-msg").textContent = `시작됨 · project ${res.project_id.slice(0, 8)}`;
+    document.querySelector('nav button[data-tab="monitor"]').click();
+    loadProjects();
+  } catch (e) { el("submit-msg").textContent = `오류: ${e.message}`; }
+};
+
+async function pollJob() {
+  if (!currentJob) return;
+  try {
+    const job = await api(`/api/jobs/${currentJob}`);
+    el("job-state").textContent = job.state;
+    el("job-source").textContent = job.source;
+    el("job-elapsed").textContent = `${job.elapsed_sec}s${job.running ? " (진행 중)" : ""}`;
+    el("job-log").innerHTML = job.log.map((l) =>
+      `<div class="${esc(l.level)}">${esc(l.message)}</div>`).join("");
+    if (!job.running && job.report && Object.keys(job.report).length) {
+      el("job-report-card").style.display = "";
+      el("job-report").textContent = JSON.stringify(job.report, null, 2);
+    }
+    if (job.error) el("job-log").innerHTML += `<div class="error">${esc(job.error)}</div>`;
+  } catch (e) { /* job not ready yet */ }
+}
+setInterval(pollJob, 1500);
+
+el("cand-load").onclick = async () => {
+  const pid = el("cand-project").value;
+  if (!pid) return;
+  const data = await api(`/api/projects/${pid}/candidates`);
+  const a = data.agreement;
+  el("agreement").textContent = a.reviewed
+    ? `검토 ${a.reviewed}건 · 동의율 ${(a.agreement * 100).toFixed(0)}% · 오탐율 ${(a.false_positive_rate * 100).toFixed(0)}%`
+    : "아직 사람의 판단이 입력되지 않았다 — 동의/반대는 12.3 B 학습 데이터가 된다";
+  el("cand-list").innerHTML = data.candidates.map((c) => `
+    <div class="card">
+      <div class="row">
+        <span class="tag ${esc(c.decision)}">${esc(c.decision)}</span>
+        <b class="grow">${esc(c.core_summary || "(요약 없음)")}</b>
+        <span class="muted">독립성 ${c.independence_score.toFixed(2)} · 밀도 ${c.density_score.toFixed(2)}
+          · 결말 ${c.has_resolution ? "있음" : "없음"}</span>
+      </div>
+      <div class="muted" style="margin-top:6px">판단 근거: ${esc(c.reason)}</div>
+      ${c.required_context ? `<div class="muted">필요한 맥락: ${esc(c.required_context)}</div>` : ""}
+      <div class="row" style="margin-top:10px">
+        <button class="small" data-v="agree" data-c="${esc(c.candidate_id)}">동의</button>
+        <button class="small" data-v="disagree" data-c="${esc(c.candidate_id)}">반대</button>
+        <span class="muted">${c.human_verdict ? esc(c.human_verdict) : ""}</span>
+      </div>
+    </div>`).join("") || `<div class="card muted">후보가 없다. 이 방송에는 만들 것이 없다는 판단일 수 있다 (정상).</div>`;
+  el("cand-list").querySelectorAll("button[data-v]").forEach((b) => b.onclick = async () => {
+    await post(`/api/projects/${pid}/candidates`, { candidate_id: b.dataset.c, verdict: b.dataset.v });
+    el("cand-load").click();
+  });
+};
+
+el("ep-load").onclick = async () => {
+  const pid = el("ep-project").value;
+  if (!pid) return;
+  const rows = await api(`/api/projects/${pid}/episodes`);
+  el("ep-list").innerHTML = rows.map((e) => `
+    <div class="card">
+      <div class="row">
+        <span class="tag">${esc(e.target_type || "?")}</span>
+        <b class="grow">${esc(e.titles[0] || "(제목 후보 없음)")}</b>
+        <span class="muted">${hms(e.duration_sec)} · ${e.cuts} 컷 · ${esc(e.render_status)}</span>
+      </div>
+      <div class="muted" style="margin-top:6px">구조 ${esc(e.structure)} — ${esc(e.rationale)}</div>
+      ${e.notes ? `<div class="muted">${esc(e.notes)}</div>` : ""}
+      ${e.titles.length > 1 ? `<div class="muted">다른 제목 후보: ${e.titles.slice(1).map(esc).join(" | ")}</div>` : ""}
+      ${e.output ? `<div class="muted">출력: ${esc(e.output)}</div>` : ""}
+      <div class="row" style="margin-top:10px">
+        <button class="small" data-plan="${esc(e.episode_id)}">편집 계획 보기</button>
+        <button class="small" data-review="approve" data-e="${esc(e.episode_id)}">승인</button>
+        <button class="small" data-review="reject" data-e="${esc(e.episode_id)}">반려</button>
+        <span class="tag">${esc(e.review_status)}</span>
+      </div>
+    </div>`).join("") || `<div class="card muted">에피소드가 없다.</div>`;
+
+  el("ep-list").querySelectorAll("button[data-plan]").forEach((b) => b.onclick = async () => {
+    const data = await api(`/api/episodes/${b.dataset.plan}/plan`);
+    el("plan-card").style.display = "";
+    el("plan-body").textContent = data.readable + "\n\n" + JSON.stringify(data.plan, null, 2);
+  });
+  el("ep-list").querySelectorAll("button[data-review]").forEach((b) => b.onclick = async () => {
+    try {
+      await post(`/api/episodes/${b.dataset.e}/review`, {
+        action: b.dataset.review, reviewer: el("reviewer").value, note: "",
+      });
+      el("ep-load").click();
+    } catch (e) { alert(e.message); }
+  });
+};
+
+loadProfile();
+loadProjects();
+</script>
+</body>
+</html>

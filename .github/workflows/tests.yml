@@ -1,0 +1,265 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  offline:
+    # The bulk of the suite needs nothing but the stdlib, so it runs first and
+    # fast: a broken import or a logic regression should not wait on apt.
+    name: offline (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Make sure ffmpeg is not on PATH
+        # The runner image may or may not carry ffmpeg - it did not, the first
+        # time this ran, and moving a binary that was not there failed the job
+        # before a single test executed. Hide it when present, and either way
+        # assert the state this job depends on.
+        run: |
+          for tool in ffmpeg ffprobe; do
+            path="$(command -v "$tool" || true)"
+            if [ -n "$path" ]; then
+              echo "hiding $path"
+              sudo mv "$path" "$path.hidden"
+            fi
+          done
+          if command -v ffmpeg; then
+            echo "ffmpeg is still reachable; this job would prove nothing" >&2
+            exit 1
+          fi
+          echo "ffmpeg is absent, as this job requires"
+
+      - name: Run the suite without ffmpeg
+        run: python -m unittest discover -s . -p "test_*.py"
+
+      - name: The media tests must have skipped, not silently vanished
+        run: |
+          python - <<'PY'
+          import re, subprocess, sys
+          out = subprocess.run(
+              [sys.executable, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py", "-v"],
+              capture_output=True, text=True,
+          ).stderr
+          skipped = len(re.findall(r"\.\.\. skipped", out))
+          ran = len(re.findall(r"\.\.\. ok", out))
+          print(f"ran {ran}, skipped {skipped}")
+          assert skipped >= 20, f"only {skipped} tests skipped without ffmpeg; the guards are not working"
+          assert ran >= 200, f"only {ran} tests ran offline"
+          PY
+
+  platforms:
+    # Everything so far was verified on Linux. 22.1 calls for a desktop
+    # program, and most streamers who would use this are on Windows, where the
+    # differences are real: no `resource` module, Scripts\ instead of bin/,
+    # backslash paths inside ffmpeg filter strings, and a console codepage that
+    # cannot print a Korean filename. This job is the only thing that actually
+    # checks any of it.
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        # Homebrew split the formula: the plain `ffmpeg` bottle links no
+        # libass, so it has no `subtitles` filter and cannot burn a caption.
+        # ffmpeg-full does. The suite tolerates either (it degrades and skips),
+        # but this job is only worth running against a build that can do the
+        # whole job.
+        run: brew install ffmpeg-full || brew install ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+      - name: Install OpenCV
+        run: pip install --quiet "opencv-python-headless<5"
+      - name: Say what this ffmpeg can actually do
+        # Both platform jobs once reported every filter missing, on builds that
+        # had them: the `-filters` table changed shape between ffmpeg 7 and 8.
+        # Printing the first rows makes the next such change visible here
+        # instead of as a mysterious refusal to render.
+        #
+        # Not `ffmpeg | head`: PowerShell fails the step when head closes the
+        # pipe ("Program 'ffmpeg.exe' failed to run: The pipe is being closed"),
+        # which is how this diagnostic broke the job it was added to diagnose.
+        shell: bash
+        run: |
+          ffmpeg -version | sed -n 1p
+          ffmpeg -hide_banner -filters > "$RUNNER_TEMP/filters.txt"
+          sed -n '1,14p' "$RUNNER_TEMP/filters.txt"
+          python -m aicut.cli doctor
+      - name: Run the whole suite
+        run: python -m unittest discover -s . -p "test_*.py"
+      - name: The editor plugins' tests must have run, not skipped for want of node
+        # `tests/test_plugin_premiere.py` runs the plugin's real JavaScript
+        # through node, and skips itself when node is missing. A skip is
+        # silent: the whole Premiere plugin would go untested on this platform
+        # and the job would still be green. Runners have node, so a skip here
+        # means something changed, not that it is fine.
+        shell: bash
+        run: |
+          python -m unittest tests.test_plugin_premiere -v 2> "$RUNNER_TEMP/plugin.txt" || {
+            cat "$RUNNER_TEMP/plugin.txt"; exit 1; }
+          if grep -q "skipped" "$RUNNER_TEMP/plugin.txt"; then
+            cat "$RUNNER_TEMP/plugin.txt"
+            echo "the Premiere plugin went untested on this platform"
+            exit 1
+          fi
+          node --version
+          tail -n 3 "$RUNNER_TEMP/plugin.txt"
+      - name: A Korean path must survive this platform's console
+        run: |
+          python -c "
+          from aicut.cli import _force_utf8_console
+          _force_utf8_console()
+          print('방송_2026-08-19 [하이라이트].mkv')
+          "
+
+  full:
+    # ffmpeg and OpenCV present: the live render, pipeline, face and path tests
+    # stop skipping. These are the ones that caught the concat path bug, the
+    # sendcmd stall and the unescaped subtitle path.
+    name: with ffmpeg and OpenCV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Say what this ffmpeg can actually do
+        shell: bash
+        run: |
+          ffmpeg -version | sed -n 1p
+          ffmpeg -hide_banner -filters > "$RUNNER_TEMP/filters.txt"
+          sed -n '1,14p' "$RUNNER_TEMP/filters.txt"
+      - name: Install optional analysis dependencies
+        run: pip install --quiet "opencv-python-headless<5"
+      - name: Run the whole suite
+        run: python -m unittest discover -s . -p "test_*.py"
+      - name: The editor plugins' tests must have run, not skipped for want of node
+        # `tests/test_plugin_premiere.py` runs the plugin's real JavaScript
+        # through node, and skips itself when node is missing. A skip is
+        # silent: the whole Premiere plugin would go untested on this platform
+        # and the job would still be green. Runners have node, so a skip here
+        # means something changed, not that it is fine.
+        shell: bash
+        run: |
+          python -m unittest tests.test_plugin_premiere -v 2> "$RUNNER_TEMP/plugin.txt" || {
+            cat "$RUNNER_TEMP/plugin.txt"; exit 1; }
+          if grep -q "skipped" "$RUNNER_TEMP/plugin.txt"; then
+            cat "$RUNNER_TEMP/plugin.txt"
+            echo "the Premiere plugin went untested on this platform"
+            exit 1
+          fi
+          node --version
+          tail -n 3 "$RUNNER_TEMP/plugin.txt"
+      - name: Report what actually ran
+        run: |
+          python - <<'PY'
+          import subprocess
+          out = subprocess.run(
+              ["python", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py", "-v"],
+              capture_output=True, text=True,
+          ).stderr
+          print("skipped:", out.count("skipped"))
+          print("ran:", out.count(" ... ok"))
+          PY
+
+  install:
+    # The package once shipped without its own calibration profile and could
+    # not start when installed. Build it and run it from outside the checkout.
+    name: build and install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          pip install --quiet build
+          python -m build
+      - name: Install the wheel into a clean environment
+        run: pip install --quiet dist/*.whl
+      - name: Run it from somewhere that is not the checkout
+        working-directory: /tmp
+        run: |
+          aicut profile
+          aicut doctor
+          python -c "
+          from aicut.config import CalibrationProfile
+          from aicut.render.subtitles import SubtitleStyleProfile
+          profile = CalibrationProfile.load()
+          assert profile.provisional, 'the shipped profile must declare what is unmeasured'
+          assert SubtitleStyleProfile.load('default').resolved('default')['fontname']
+          print('installed package loads its own resources')
+          "
+
+  desktop:
+    # 22.1 asks for a program, not a command. An executable nobody has run is
+    # not a deliverable, so this builds it on every platform it claims to ship
+    # on and then RUNS it - from outside the checkout, so a build that only
+    # works next to its own source fails here.
+    name: desktop build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PyInstaller
+        run: pip install --quiet pyinstaller
+      - name: Build the executable
+        run: python -m PyInstaller --clean --noconfirm aicut.spec
+      - name: Run it from somewhere that is not the checkout
+        shell: bash
+        run: |
+          set -e
+          # Not `[ ... ] && exe=...`: under `set -e` the false branch returns 1
+          # and kills the step on every platform that is not Windows.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            exe="$PWD/dist/aicut.exe"
+          else
+            exe="$PWD/dist/aicut"
+          fi
+          cd "$RUNNER_TEMP"
+          "$exe" --check --workspace "$RUNNER_TEMP/aicut-ws" --no-browser
+      - name: The workspace it chose must be writable and outside the checkout
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, ".")
+          from aicut.desktop import default_workspace
+          target = default_workspace()
+          target.mkdir(parents=True, exist_ok=True)
+          probe = target / "writable.check"
+          probe.write_text("ok", encoding="utf-8")
+          assert probe.read_text(encoding="utf-8") == "ok"
+          probe.unlink()
+          print(f"workspace {target} is writable")
+          PY

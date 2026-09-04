@@ -1,0 +1,450 @@
+"""PLANNING: structure, scene retrieval, pacing, and the edit plan (7-9장).
+
+The order of operations mirrors the document: decide how *this* content should be
+shown (7장), search the source for the scenes that shape needs (8.1), lay them out
+on a timeline with an editing intent per cut (8.2), then decide what happens to
+the silence inside each cut (9장). The stage ends by writing an edit plan and
+touching no video at all - which is what makes MVP 5 a shippable milestone whose
+success test is "can a person read the plan and predict the video".
+
+Two rules from 2장 are enforced here rather than trusted:
+
+* the structure is whatever the producer chose for this content, and cut order
+  follows that structure, not source time;
+* the user's length hint is a hint. When the plan departs from it, the departure
+  and its reason go into the report (2.6).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Sequence
+
+from aicut.analysis.pacing import PacingJudge, build_silence_contexts, trim_target
+from aicut.models import (
+    ContentCandidate,
+    Cut,
+    Episode,
+    Event,
+    PacingMode,
+    SubtitleLine,
+    UNKNOWN_SPEAKER,
+    Utterance,
+)
+from aicut.pipeline.context import RunContext
+from aicut.pipeline.retrieval import SceneIndex
+from aicut.render.editplan import EditPlan
+from aicut.render.ffmpeg import RenderSettings
+from aicut.render.timeline import Timeline
+
+log = logging.getLogger(__name__)
+
+
+def run(
+    ctx: RunContext,
+    groups: Sequence[Sequence[ContentCandidate]],
+    *,
+    knowledge: dict | None = None,
+) -> list[Episode]:
+    """Plan one episode per candidate group."""
+    events = {e.event_id: e for e in ctx.store.events(ctx.project.project_id)}
+    utterances = ctx.store.utterances(ctx.project.project_id)
+    index = SceneIndex.build(
+        utterances, list(events.values()), ctx.store.details(ctx.project.project_id),
+        profile=ctx.profile, source_sec=ctx.project.duration_sec,
+    )
+
+    episodes: list[Episode] = []
+    for group in groups:
+        episode = plan_episode(ctx, list(group), events, index, utterances, knowledge=knowledge)
+        if episode is not None:
+            episodes.append(episode)
+    ctx.note("episodes_planned", len(episodes))
+    return episodes
+
+
+def plan_episode(
+    ctx: RunContext,
+    group: list[ContentCandidate],
+    events: dict[str, Event],
+    index: SceneIndex,
+    utterances: list[Utterance],
+    *,
+    knowledge: dict | None = None,
+) -> Episode | None:
+    group_events = [events[eid] for c in group for eid in c.related_event_ids if eid in events]
+    if not group_events:
+        log.warning("candidate group has no resolvable events; skipping")
+        return None
+
+    structure = ctx.producer.plan_structure({
+        "content": {
+            "core_summary": " / ".join(c.core_summary for c in group),
+            "required_context": [c.required_context for c in group if c.required_context],
+            "combined_from": [c.candidate_id for c in group],
+        },
+        "events": [
+            {"event_id": e.event_id, "summary": e.summary, "people": e.people, "relations": e.relations}
+            for e in group_events
+        ],
+        "mentions": [
+            {
+                "event_id": e.event_id,
+                "source_start_sec": m.source_start_sec,
+                "source_end_sec": m.source_end_sec,
+                "role": m.role,
+                "quote": m.quote,
+            }
+            for e in group_events for m in e.mentions
+        ],
+        "length_hint_sec": ctx.project.length_hint_sec,
+        "youtube_knowledge": knowledge or {},
+        "speaker_reliability": ctx.signals.speaker_reliability,
+    })
+
+    episode = Episode(
+        project_id=ctx.project.project_id,
+        candidate_ids=[c.candidate_id for c in group],
+        planned_structure=structure,
+        target_type=structure.get("target_type", ""),
+    )
+    episode.timeline = _lay_out_cuts(ctx, structure, index)
+    if not episode.timeline:
+        log.warning("no scene survived retrieval for episode %s; not producing it", episode.episode_id)
+        return None
+
+    _apply_pacing(ctx, episode)
+    timeline = Timeline.from_cuts(episode.timeline)
+    episode.subtitles = _subtitles(
+        episode, timeline, utterances, ctx.signals.speaker_reliability, ctx=ctx,
+    )
+    episode.planned_duration_sec = timeline.duration
+    _note_length_deviation(ctx, episode, structure)
+    _note_implausible_plan(ctx, episode)
+
+    ctx.store.save_episode(episode)
+    _write_plan(ctx, episode)
+    return episode
+
+
+# ---------------------------------------------------------------------------
+def _lay_out_cuts(ctx: RunContext, structure: dict, index: SceneIndex) -> list[Cut]:
+    """Turn the planned beats into cuts, in the structure's order (2.4, 8.2)."""
+    head_pad = ctx.profile.get_float("retrieval.cut_padding_head_sec")
+    tail_pad = ctx.profile.get_float("retrieval.cut_padding_tail_sec")
+    duration = ctx.project.duration_sec
+
+    cuts: list[Cut] = []
+    for order, beat in enumerate(structure.get("beats", []) or []):
+        query = beat.get("query", "") or beat.get("intent", "")
+        results = index.search(
+            query,
+            ctx.profile,
+            event_id=beat.get("must_include_event_id"),
+            role=beat.get("role"),
+            near_sec=beat.get("hint_start_sec"),
+        )
+        if not results:
+            log.info("beat %r retrieved nothing", beat.get("role", order))
+            continue
+
+        chosen = ctx.producer.select_scene({
+            "beat": beat,
+            # What earlier beats already took. 2.4 lets an episode revisit a
+            # moment, so this is not a ban - but the decision cannot be made by
+            # something that does not know. Without it, three consecutive beats
+            # took the identical 5.82-21.72 span on a real film, because each
+            # was handed the same top-scoring scene and had no way to tell.
+            "already_used": [
+                {"start_sec": c.source_start_sec, "end_sec": c.source_end_sec,
+                 "role": c.scene_role}
+                for c in cuts
+            ],
+            "candidates": [
+                {
+                    "index": i,
+                    "start_sec": r.scene.start_sec,
+                    "end_sec": r.scene.end_sec,
+                    "speaker": r.scene.speaker,
+                    "text": r.scene.text[:400],
+                    "roles": r.scene.roles,
+                    "score": round(r.score, 3),
+                    "matched": r.matched,
+                }
+                for i, r in enumerate(results)
+            ],
+        })
+        picked = chosen.get("chosen_index")
+        if picked is None or not (0 <= int(picked) < len(results)):
+            log.info("beat %r rejected every retrieved scene", beat.get("role", order))
+            continue
+
+        scene = results[int(picked)].scene
+        repeat = next(
+            (c for c in cuts
+             if abs(c.source_start_sec - max(0.0, float(chosen.get("start_sec", scene.start_sec)) - head_pad)) < 0.01
+             and abs(c.source_end_sec - min(duration, float(chosen.get("end_sec", scene.end_sec)) + tail_pad)) < 0.01),
+            None,
+        )
+        if repeat is not None:
+            # Allowed (2.4) but worth saying: a viewer sees the same shot twice.
+            ctx.report.setdefault("repeated_spans", []).append({
+                "start_sec": round(repeat.source_start_sec, 2),
+                "end_sec": round(repeat.source_end_sec, 2),
+                "roles": [repeat.scene_role, beat.get("role", "")],
+                "detail": (
+                    f"the span {repeat.source_start_sec:.1f}-{repeat.source_end_sec:.1f}s is used "
+                    f"by more than one beat ({repeat.scene_role} and {beat.get('role','?')}); "
+                    "2.4 allows revisiting a moment, but the same shot will appear twice"
+                ),
+            })
+        start = float(chosen.get("start_sec", scene.start_sec)) - head_pad
+        end = float(chosen.get("end_sec", scene.end_sec)) + tail_pad
+        start = max(0.0, start)
+        end = min(duration, end) if duration else end
+        if end <= start:
+            continue
+
+        cuts.append(Cut(
+            sequence_order=len(cuts),
+            source_start_sec=start,
+            source_end_sec=end,
+            speaker_tag=chosen.get("speaker", scene.speaker) or UNKNOWN_SPEAKER,
+            scene_role=beat.get("role", ""),
+            visual_effect=beat.get("visual_effect", {}) or {},
+            audio_effect=beat.get("audio_effect", {}) or {},
+            subtitle_ref=None,
+        ))
+    return cuts
+
+
+def _apply_pacing(ctx: RunContext, episode: Episode) -> None:
+    """Decide, per silence, whether it is a beat or dead air (9장)."""
+    judge = PacingJudge(ctx.profile, ctx.producer)
+    utterances = ctx.store.utterances(ctx.project.project_id)
+
+    for cut in episode.timeline:
+        inside = [
+            s for s in ctx.signals.silences
+            if s.start_sec >= cut.source_start_sec and s.end_sec <= cut.source_end_sec
+        ]
+        if not inside:
+            cut.pacing_mode = PacingMode.KEEP
+            cut.pacing_reason = "no silence inside this cut"
+            continue
+
+        contexts = build_silence_contexts(
+            inside, utterances, ctx.signals.tension, ctx.signals.motion, ctx.profile,
+            scene_role=cut.scene_role,
+        )
+        decisions = judge.judge_all(contexts)
+        removals: list[list[float]] = []
+        records: list[dict] = []
+        for decision in decisions:
+            span = trim_target(decision, ctx.profile)
+            if span and span[1] > span[0]:
+                removals.append([span[0], span[1]])
+            records.append({
+                "start_sec": decision.silence.start_sec,
+                "end_sec": decision.silence.end_sec,
+                "mode": decision.mode.value,
+                "reason": decision.reason,
+                "decided_by": decision.decided_by,
+                "score": decision.score,
+            })
+
+        cut.remove_spans = _merge_spans(removals)
+        cut.silences = records
+        modes = {d.mode for d in decisions}
+        if not cut.remove_spans:
+            cut.pacing_mode = PacingMode.KEEP
+        elif modes == {PacingMode.CUT}:
+            cut.pacing_mode = PacingMode.CUT
+        else:
+            cut.pacing_mode = PacingMode.TRIM
+        kept = sum(1 for d in decisions if d.mode is PacingMode.KEEP)
+        cut.pacing_reason = (
+            f"{len(decisions)} silences: {kept} kept as beats, {len(decisions) - kept} compressed or removed"
+        )
+
+
+def _merge_spans(spans: list[list[float]]) -> list[list[float]]:
+    if not spans:
+        return []
+    ordered = sorted(spans)
+    merged = [list(ordered[0])]
+    for start, end in ordered[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return merged
+
+
+def _subtitles(
+    episode: Episode,
+    timeline: Timeline,
+    utterances: list[Utterance],
+    speaker_reliability: float,
+    *,
+    ctx: RunContext | None = None,
+) -> list[SubtitleLine]:
+    """Place speech on the output clock, splitting lines that straddle a removal.
+
+    Words the recogniser was not confident about are left out. A recogniser
+    given music or room tone does not return nothing - it returns words, with
+    low scores, and burning them in puts invented sentences on screen for the
+    length of the video. Measured on a real film: a passage with no dialogue
+    produced "whom moon when he first thing and that", burned in.
+    """
+    lines: list[SubtitleLine] = []
+    per_speaker_styles = speaker_reliability >= 0.9      # 16장: off when tags are unreliable
+    floor = ctx.profile.get_float("subtitle.min_word_confidence") if ctx else 0.0
+    keep_ratio = ctx.profile.get_float("subtitle.min_kept_word_ratio") if ctx else 0.0
+    dropped = 0
+    scored_words = 0
+
+    for segment in timeline.segments:
+        for utterance in utterances:
+            start = max(utterance.start_sec, segment.source_start_sec)
+            end = min(utterance.end_sec, segment.source_end_sec)
+            if end - start <= 0.05:
+                continue
+            out_start = segment.out_start_sec + (start - segment.source_start_sec)
+            out_end = segment.out_start_sec + (end - segment.source_start_sec)
+            text, seen, kept = _clip_text(utterance, start, end, floor)
+            scored_words += seen
+            if not text:
+                # Empty because every word was doubted is a drop, not an
+                # absence, and 2.6 wants it counted rather than passed over.
+                if seen and not kept:
+                    dropped += 1
+                continue
+            # A line that lost most of its words to the confidence floor is not
+            # a line worth showing; what is left is a fragment of a guess.
+            if seen and kept / seen < keep_ratio:
+                dropped += 1
+                continue
+            style = None
+            if per_speaker_styles and utterance.speaker not in (UNKNOWN_SPEAKER, ""):
+                style = "default"
+            lines.append(SubtitleLine(
+                start_sec=out_start, end_sec=out_end, text=text,
+                speaker=utterance.speaker, style=style,
+            ))
+    lines.sort(key=lambda l: l.start_sec)
+
+    if ctx is not None:
+        if dropped:
+            ctx.report.setdefault("subtitles_dropped", []).append({
+                "episode_id": episode.episode_id,
+                "lines": dropped,
+                "floor": floor,
+                "detail": (
+                    f"{dropped} subtitle line(s) dropped: the recogniser scored their words "
+                    f"below subtitle.min_word_confidence={floor}. Lower it if real speech is "
+                    "going missing (17.1: it is a profile value)."
+                ),
+            })
+        elif not scored_words and lines:
+            # PocketSphinx returns no score at all, so nothing can be filtered
+            # and a passage of music becomes a burned-in sentence. Say so rather
+            # than let the operator assume the captions were checked.
+            ctx.report.setdefault("subtitle_confidence_note", (
+                "this STT backend reports no per-word confidence, so no caption could be "
+                "checked against subtitle.min_word_confidence - music or room tone can "
+                "become invented text on screen. faster-whisper and whisperx do report it."
+            ))
+    return lines
+
+
+def _clip_text(utterance: Utterance, start: float, end: float, floor: float = 0.0):
+    """Keep the words inside the span that the recogniser stood behind.
+
+    Returns the text, how many words carried a score at all, and how many of
+    those cleared the floor. A backend that reports no score - PocketSphinx has
+    none to give - leaves `seen` at zero, and nothing is dropped: not knowing a
+    word is wrong is not the same as knowing it is.
+    """
+    if not utterance.words:
+        return utterance.text, 0, 0
+    inside = [
+        w for w in utterance.words
+        if w.get("start") is not None and start - 0.05 <= float(w["start"]) <= end + 0.05
+    ]
+    seen = kept = 0
+    words = []
+    for word in inside:
+        score = word.get("score")
+        if score is None:
+            words.append(word["word"])
+            continue
+        seen += 1
+        if float(score) >= floor:
+            kept += 1
+            words.append(word["word"])
+    return " ".join(w.strip() for w in words if w).strip() or "", seen, kept
+
+
+def _note_implausible_plan(ctx: RunContext, episode: Episode) -> None:
+    """Catch a plan that cannot describe this source, whatever produced it.
+
+    An episode may legitimately be long, and 2.4 lets it revisit a moment more
+    than once, so cuts overlapping is not by itself wrong. Running longer than
+    the broadcast it was cut from is: measured on a six-hour source, a
+    retrieval fault yielded an episode of 3,830,063 seconds. Nothing noticed,
+    because the only length check compares against a hint the operator may
+    never have given. This one needs no hint.
+    """
+    source = ctx.project.duration_sec
+    if not source or not episode.planned_duration_sec:
+        return
+    if episode.planned_duration_sec <= source:
+        return
+    note = (
+        f"planned {episode.planned_duration_sec:.0f}s from a {source:.0f}s source - "
+        "an episode cannot outrun its own broadcast, so retrieval or the structure is wrong"
+    )
+    log.error("%s: %s", episode.episode_id, note)
+    episode.notes = f"{episode.notes}\n{note}".strip()
+    ctx.report.setdefault("implausible_plans", []).append(
+        {"episode_id": episode.episode_id, "planned_sec": episode.planned_duration_sec,
+         "source_sec": source, "cuts": len(episode.timeline), "detail": note}
+    )
+
+
+def _note_length_deviation(ctx: RunContext, episode: Episode, structure: dict) -> None:
+    hint = ctx.project.length_hint_sec
+    if not hint:
+        return
+    actual = episode.planned_duration_sec
+    if actual and abs(actual - hint) / hint > 0.25:
+        note = structure.get("length_note") or "the content did not fit the hinted length"
+        episode.notes = (
+            f"length hint {hint:.0f}s, planned {actual:.0f}s - the hint is not a constraint (2.6). {note}"
+        )
+        ctx.report.setdefault("length_deviations", []).append({
+            "episode_id": episode.episode_id,
+            "hint_sec": hint,
+            "planned_sec": round(actual, 1),
+            "reason": note,
+        })
+
+
+def _write_plan(ctx: RunContext, episode: Episode) -> EditPlan:
+    settings = RenderSettings.from_profile(ctx.profile, target_type=episode.target_type)
+    plan = EditPlan.from_episode(
+        episode,
+        ctx.project.file_path,
+        render_settings=settings.as_dict(),
+        provenance={
+            "profile": ctx.profile.name,
+            "profile_source": str(ctx.profile.source_path) if ctx.profile.source_path else "",
+            "provisional_parameters_used": ctx.profile.touched_provisional(),
+            "producer": ctx.producer.name,
+        },
+    )
+    path = ctx.project_dir / "plans" / f"{episode.episode_id}.json"
+    plan.save(path)
+    ctx.report.setdefault("edit_plans", []).append(str(path))
+    return plan

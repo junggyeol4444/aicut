@@ -18,6 +18,7 @@ from aicut.render.editplan import EditPlan
 from aicut.render.exchange import (
     UnsupportedFrameRate,
     media_src,
+    plan_fps,
     timecode,
     to_edl,
     to_fcpxml,
@@ -217,3 +218,39 @@ class SrtTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrameRateFallbackTests(unittest.TestCase):
+    """A plan the pipeline writes carries no render settings.
+
+    Found by exporting a real run's plan: every export refused until the
+    operator went and looked the rate up, while the file the cuts point at
+    states it. The source's rate is the right fallback because the editor's
+    sequence is being built from that file - but only a fallback.
+    """
+
+    def _plan_the_pipeline_writes(self):
+        """render_settings is None on a real plan, not an empty dict."""
+        plan = _plan([Cut(0, 0.0, 1.0)])
+        plan.render_settings = None
+        return plan
+
+    def test_an_explicit_rate_wins_over_everything(self):
+        plan = _plan([Cut(0, 0.0, 1.0)], settings={"fps": 25})
+        self.assertEqual(plan_fps(plan, 30, source_fps=24), 30.0)
+
+    def test_the_plan_beats_the_source(self):
+        plan = _plan([Cut(0, 0.0, 1.0)], settings={"fps": 25})
+        self.assertEqual(plan_fps(plan, None, source_fps=24), 25.0)
+
+    def test_the_source_is_used_when_the_plan_says_nothing(self):
+        plan = self._plan_the_pipeline_writes()
+        self.assertEqual(plan_fps(plan, None, source_fps=24), 24.0)
+
+    def test_with_nothing_to_go_on_it_still_refuses_rather_than_guessing(self):
+        """23.976 and 24 differ by a frame every 42 seconds. A default here
+        would be wrong quietly, which is worse than asking."""
+        plan = self._plan_the_pipeline_writes()
+        with self.assertRaises(AicutError) as raised:
+            plan_fps(plan, None, source_fps=None)
+        self.assertIn("--fps", str(raised.exception))

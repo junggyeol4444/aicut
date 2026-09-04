@@ -80,16 +80,31 @@ def _segments(plan: EditPlan) -> list[Segment]:
     return segments
 
 
-def plan_fps(plan: EditPlan, override: float | None = None) -> float:
-    """The rate to write timecode at: what was asked for, then what the plan says."""
+def plan_fps(
+    plan: EditPlan,
+    override: float | None = None,
+    *,
+    source_fps: float | None = None,
+) -> float:
+    """The rate to write timecode at: what was asked for, then the plan, then the source.
+
+    A plan written by the pipeline carries no `render_settings`, so before the
+    source was consulted every real export demanded a `--fps` the operator had
+    to go and look up - while the file the cuts point at states its own rate,
+    and that is the rate an editor's sequence wants when it is built from that
+    file. It is still only a fallback: an explicit --fps wins, and a source
+    that cannot be read leaves the refusal in place rather than a guess.
+    """
     if override:
         return float(override)
     fps = (plan.render_settings or {}).get("fps")
     if fps:
         return float(fps)
+    if source_fps:
+        return float(source_fps)
     raise AicutError(
-        "this plan does not record a frame rate, so timecode cannot be written. "
-        "Pass --fps with the rate the editor's sequence uses."
+        "this plan does not record a frame rate and its source could not be read, so "
+        "timecode cannot be written. Pass --fps with the rate the editor's sequence uses."
     )
 
 
@@ -273,6 +288,7 @@ def export(
     fps: float | None = None,
     source_size: tuple[int, int] | None = None,
     source_duration_sec: float | None = None,
+    source_fps: float | None = None,
 ) -> Path:
     """Write one exchange file for this plan."""
     if fmt not in FORMATS:
@@ -282,7 +298,7 @@ def export(
     if fmt == "srt":
         text = to_srt(plan)
     else:
-        rate = plan_fps(plan, fps)
+        rate = plan_fps(plan, fps, source_fps=source_fps)
         text = to_edl(plan, rate) if fmt == "edl" else to_fcpxml(
             plan, rate, source_duration_sec=source_duration_sec, source_size=source_size,
         )

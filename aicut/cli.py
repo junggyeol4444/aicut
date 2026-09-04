@@ -261,7 +261,7 @@ def cmd_export(args) -> int:
 
     # The source's real shape and length, when it can be read. Guessing them
     # makes an importer letterbox the clip or cut the timeline short.
-    size = duration = None
+    size = duration = source_fps = None
     if have_ffmpeg() and Path(plan.source_path).exists():
         from aicut.media.probe import probe
 
@@ -269,6 +269,9 @@ def cmd_export(args) -> int:
         if media.width and media.height:
             size = (media.width, media.height)
         duration = media.duration_sec or None
+        # A plan the pipeline wrote carries no render settings, so without this
+        # every real export asked for a --fps the operator had to go look up.
+        source_fps = media.fps or None
     else:
         print("  note: the source file was not readable here, so the FCPXML declares the "
               "sequence's own size for it - relink in the editor if the clip looks stretched")
@@ -284,7 +287,8 @@ def cmd_export(args) -> int:
         suffix = {"edl": ".edl", "fcpxml": ".fcpxml", "srt": ".srt"}[fmt]
         target = (out / f"{plan.episode_id}{suffix}") if as_directory else out
         written.append(export(plan, target, fmt=fmt, fps=args.fps,
-                              source_size=size, source_duration_sec=duration))
+                              source_size=size, source_duration_sec=duration,
+                              source_fps=source_fps))
     for path in written:
         print(f"wrote {path}")
     print("  open it in Premiere Pro, DaVinci Resolve or Final Cut; the cuts are the "
